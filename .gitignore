@@ -1,0 +1,19 @@
+# Ignore pycache
+__pycache__/
+*.py[cod]
+
+# Ignore Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# Ignore virtual environments
+venv/
+.env/
+
+# Ignore system files
+.DS_Store
+Thumbs.db
+
+# Ignore utils code
+src/utils/
+assets/fs_license.txt
+opt/mpet_source_code/

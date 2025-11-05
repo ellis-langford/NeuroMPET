@@ -1,0 +1,29 @@
+{
+"run_preprocessing": true,
+"run_registration": true,
+"run_cortical_segmentation": true,
+"run_surface_generation": true,
+"run_mesh_mapping": true,
+"run_modelling": true,
+
+"modality": "t1",
+"reset_origin": true,
+"normalise_intensities": true,
+"rescale_max": 1000,
+"n4_bias_correct": true,
+
+"input_atlas": "",
+"reg_type": "Rigid",
+
+"big_vents": false,
+"large_FOV": false,
+
+"adjust_labels_dwi": false,
+"adjust_outer_labels": false,
+"generate_cbf_map": false,
+"generate_fa_map": false,
+
+"timestep_size": 0.1,
+"timestep_count": 10,
+"timestep_interval": 100
+}
