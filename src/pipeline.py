@@ -2,6 +2,7 @@
 import os
 import sys
 import shutil
+sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
 # Processing imports
 from src.core.inputs import Inputs
@@ -61,14 +62,19 @@ class NeuroMPET(BaseCog):
         self.interim_dir = os.path.join(self.base_dir, "interim_outputs")
         self.log_dir     = os.path.join(self.base_dir, "logs")
         self.output_dir  = os.path.join(self.base_dir, "outputs")
+        self.tmp_dir    = "/app/tmp"
 
         for _dir in [self.input_dir, self.interim_dir, 
-                     self.log_dir, self.output_dir]:
+                     self.log_dir, self.output_dir, self.tmp_dir]:
             shutil.rmtree(_dir, ignore_errors=True)
             os.makedirs(_dir, exist_ok=True)
 
         # Record parameters
         self.loggers.log_options(self.parameters)
+
+        # Cortical segmentation environment variables
+        self.freesurfer_env = os.environ.copy()
+        self.freesurfer_env["SUBJECTS_DIR"] = self.tmp_dir
 
         # Prepare inputs
         input_prepper = Inputs(self)

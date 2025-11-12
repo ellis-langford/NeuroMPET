@@ -247,6 +247,8 @@ class MeshLoaders(object):
                     cell_lines = []
                     prev = 0
                     for off in offsets:
+                        if off == 0:
+                            continue
                         cell_nodes = connectivity[prev:off]
                         cell_lines.append(f"{len(cell_nodes)} " + " ".join(map(str, cell_nodes)))
                         prev = off

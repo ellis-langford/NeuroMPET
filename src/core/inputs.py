@@ -10,7 +10,8 @@ class Inputs(object):
         # Check all expected attributed are present
         to_inherit = ["utils", "loggers", "parameters",
                       "base_dir", "log_dir", "input_dir", 
-                      "interim_dir", "output_dir"]
+                      "interim_dir", "output_dir", "tmp_dir",
+                      "freesurfer_env"]
         for attr in to_inherit:
             try:
                 setattr(self, attr, getattr(plugin_obj, attr))
@@ -36,6 +37,7 @@ class Inputs(object):
                         self.loggers.errors(f"FreeSurfer outputs directory --freesurfer_outputs "
                                             f"does not exist {self.parameters['freesurfer_outputs']}")
                     else:
+                        self.fs_outputs = os.path.join(self.input_dir, "fs_outputs")
                         shutil.copytree(self.parameters["freesurfer_outputs"], self.fs_outputs)
         else:
             # Not a valid directory
@@ -58,7 +60,6 @@ class Inputs(object):
         """
         Copy segmentation inputs to working directory
         """
-        self.fs_outputs = os.path.join(self.input_dir, "fs_outputs")
         self.segmentation_dir = os.path.join(self.input_dir, "segmentations")
         os.makedirs(self.segmentation_dir)
         

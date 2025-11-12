@@ -11,8 +11,8 @@ class FreeSurfer(object):
     """Class setup"""
     def __init__(self, plugin_obj):
         # Check all expected attributed are present
-        to_inherit = ["loggers", "parameters", "base_dir", 
-                      "input_dir", "interim_dir", "output_dir", "log_dir"]
+        to_inherit = ["loggers", "parameters", "base_dir", "freesurfer_env",
+                      "input_dir", "interim_dir", "output_dir", "log_dir", "tmp_dir"]
         for attr in to_inherit:
             try:
                 setattr(self, attr, getattr(plugin_obj, attr))
@@ -25,8 +25,9 @@ class FreeSurfer(object):
         Build freesurfer command.
         """
         # Define command
+        self.subject_id = self.parameters["subject_id"]
         self.freesurfer_source  = "source $FREESURFER_HOME/SetUpFreeSurfer.sh && "
-        self.freesurfer_command = f"recon-all -i {self.input_im} -subject fs_outputs " + \
+        self.freesurfer_command = f"recon-all -i {self.input_im} -subject {self.subject_id} " + \
                                   f"-all -parallel -norandomness"
 
         # Add extra flags
@@ -36,8 +37,11 @@ class FreeSurfer(object):
             if self.parameters[_input]:
                 self.freesurfer_command += f" -{tag}"
 
-        self.freesurfer_env                 = os.environ.copy()
-        self.freesurfer_env["SUBJECTS_DIR"] = self.interim_dir
+        # if self.parameters["run_preprocessing"]:
+        #     if self.parameters["normalise_intensities"] or self.parameters["n4_bias_correct"]:
+        #         self.freesurfer_command += " -nonormalization"
+        # else:
+        #     self.freesurfer_command += " -nonormalization"
 
     def run_freesurfer(self):
         """
@@ -58,8 +62,8 @@ class FreeSurfer(object):
                                 f"please check log file at {self.freesurfer_log}")
 
         # Check required outputs have been produced
-        segmentation = os.path.join(self.fs_outputs, "mri", "aseg.mgz")
-        output_im    = os.path.join(self.fs_outputs, "mri", "T1.mgz")
+        segmentation = os.path.join(self.tmp_dir, self.subject_id, "mri", "aseg.mgz")
+        output_im    = os.path.join(self.tmp_dir, self.subject_id, "mri", "T1.mgz")
         if not os.path.exists(segmentation):
             self.loggers.errors(f"Freesurfer has not produced a segmentation at {segmentation}" +
                                 f"- please check log file at {self.freesurfer_log}")
@@ -67,6 +71,9 @@ class FreeSurfer(object):
             self.loggers.errors(f"Freesurfer has not produced an output image at {output_im} - " +
                                 f"please check log file at {self.freesurfer_log}")
         else:
+            shutil.copytree(os.path.join(self.tmp_dir, self.parameters["subject_id"]), os.path.join(self.interim_dir, "fs_outputs"))
+            # if os.path.isdir(os.path.join(self.interim_dir, "segmentation")):
+            #     shutil.rmtree(os.path.join(self.tmp_dir, self.subject_id))
             self.loggers.plugin_log("Freesurfer run successfully")
 
     def convert_T1(self):
@@ -258,6 +265,7 @@ class FreeSurfer(object):
         Run FreeSurfer cortical segmentation
         """
         # Define parameters
+        self.subject_id = self.parameters["subject_id"]
         self.interim_dir = os.path.join(self.interim_dir, "segmentation")
         os.makedirs(self.interim_dir, exist_ok=True)
         regions = self.parameters["regions"].split(",")
@@ -276,7 +284,6 @@ class FreeSurfer(object):
             self.loggers.plugin_log("Running Freesurfer")
             self.build_freesurfer_command()
             self.run_freesurfer()
-            # shutil.copytree("/mnt/ellis/projects/workflow/3a.cortical_segmentation/oasis_subset/OAS30010_MR_d0068/fs_outputs/OAS30010_MR_d0068", os.path.join(self.interim_dir, "fs_outputs"))
 
         # FreeSurfer outputs already provided    
         else:
@@ -284,8 +291,8 @@ class FreeSurfer(object):
 
         # Convert aseg file to NIfTI
         self.loggers.plugin_log("Converting aseg and T1 file to NIfTI")
-        self.convert_seg()
         self.convert_T1()
+        self.convert_seg()
 
         # Create region binary files
         self.loggers.plugin_log("Creating region binary files")

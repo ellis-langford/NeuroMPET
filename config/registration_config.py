@@ -1,5 +1,10 @@
 NAME = "NeuroMPET"
 PARAMETERS = {
+    "props_fpath": {
+        "type": str,
+        "default": "",
+        "help": "Path to optional properties file containing additional parameters"
+    },
     "input_im": {
         "type": str,
         "default": "",

@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="./assets/neuro_mpet_logo.png" width="700">
+  <img src="./assets/mesh_model_logo.png" width="700">
   <br><br>
   <p align="center"><strong>Neuro Multiple-Network Poroelastic Theory: Meshing & Modelling</strong></p>
 </div>

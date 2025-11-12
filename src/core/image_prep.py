@@ -100,28 +100,36 @@ class ImagePrep(object):
         output_im (str)   : Path to save intensity-normalized image
         rescale_max (int) : Desired intensity value of white matter peak (default 1000)
         """
+        scale_wm_peak = self.parameters["wm_peak_scaling"]
         # Load image
         nii = nib.load(input_im)
         data = nii.get_fdata()
         affine = nii.affine.copy()
     
-        # Mask non-zero voxels (assume background is 0)
-        brain_voxels = data[data > 0]
+        if scale_wm_peak:
+            # Mask non-zero voxels (eps to account for non-zero background due to n4 correction)
+            eps = 1e-3
+            brain_voxels = data[data > eps]
+            
+            # Estimate white matter peak
+            hist, bin_edges = np.histogram(brain_voxels, bins=1000, range=(np.min(brain_voxels), np.max(brain_voxels)))
+            peaks, _ = find_peaks(hist)
     
-        # Estimate white matter peak
-        hist, bin_edges = np.histogram(brain_voxels, bins=1000, range=(np.min(brain_voxels), np.max(brain_voxels)))
-        peaks, _ = find_peaks(hist)
+            if len(peaks) == 0:
+                self.loggers.errors("Could not find intensity peaks in histogram")
+                return
     
-        if len(peaks) == 0:
-            self.loggers.errors("Could not find intensity peaks in histogram")
-            return
+            # Assume white matter peak is the highest peak (could refine further)
+            wm_peak_index = peaks[np.argmax(hist[peaks])]
+            wm_peak_intensity = bin_edges[wm_peak_index]
     
-        # Assume white matter peak is the highest peak (could refine further)
-        wm_peak_index = peaks[np.argmax(hist[peaks])]
-        wm_peak_intensity = bin_edges[wm_peak_index]
-    
-        # Scale image so that wm_peak_intensity → rescale_max
-        scale_factor = rescale_max / wm_peak_intensity
+            # Scale image so that wm_peak_intensity → rescale_max
+            scale_factor = rescale_max / wm_peak_intensity
+
+        else:
+            max_intensity = np.max(data)
+            scale_factor = rescale_max / max_intensity
+            
         norm_data = data * scale_factor
     
         # Clean up header

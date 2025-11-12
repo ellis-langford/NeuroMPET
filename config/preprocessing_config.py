@@ -1,5 +1,10 @@
 NAME = "NeuroMPET"
 PARAMETERS = {
+    "props_fpath": {
+        "type": str,
+        "default": "",
+        "help": "Path to optional properties file containing additional parameters"
+    },
     "input_im": {
         "type": str,
         "default": "",
@@ -19,6 +24,11 @@ PARAMETERS = {
         "type": bool,
         "default": True,
         "help": "If True, image intensities are normalised (default: True)"
+    },
+    "wm_peak_scaling": {
+        "type": bool,
+        "default": True,
+        "help": "If True, image intensities are scaled according to the white matter peak, else to a defined range (default: True)"
     },
     "rescale_max": {
         "type": int,

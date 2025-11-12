@@ -1,5 +1,15 @@
 NAME = "NeuroMPET"
 PARAMETERS = {
+    "props_fpath": {
+        "type": str,
+        "default": "",
+        "help": "Path to optional properties file containing additional parameters"
+    },
+    "subject_id": {
+        "type": str,
+        "default": "subject999",
+        "help": "SubjectID of data to be analysed"
+    },
     "input_im": {
         "type": str,
         "default": "",
@@ -19,7 +29,7 @@ PARAMETERS = {
     },
     "big_vents": {
         "type": bool,
-        "default": True,
+        "default": False,
         "help": "Aids processing if subject has enlarged ventricles (default: True)"
     },
     "large_FOV": {
