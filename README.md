@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="./assets/mesh_model_logo.png" width="700">
+  <img src="./assets/neuro_mpet_logo.png" width="700">
   <br><br>
   <p align="center"><strong>Neuro Multiple-Network Poroelastic Theory: Meshing & Modelling</strong></p>
 </div>
@@ -13,14 +13,14 @@
 
 ## Introduction
 
-MeshModel is the second module of the NeuroMPET workflow and is responsible for the meshing, mesh mapping and modelling stages of the pipeline.
+NeuroMPET is a processing workflow that: preprocesses, registers, segments a NIfTI image; then generates meshes, maps tissue classes onto the mesh and models using the MPET solver.
 
 The core solver code was developed by Liwei Guo (liwei.guo@ucl.ac.uk) and Yiannis Ventikos (y.ventikos@ucl.ac.uk) at University College London. To request access to the MPET solver core code please contact Ellis Langford (ellis.langford.19@ucl.ac.uk).
 
 
 ## Requirements
 
-To successfully run the MeshModel pipeline, please ensure the following requirements are met:
+To successfully run the NeuroMPET pipeline, please ensure the following requirements are met:
 
 **Ubuntu 22.04 + Docker 27.3.1 + Python 3.10**<br>
 *(other versions may be compatible but have not been tested)*
