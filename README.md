@@ -69,7 +69,7 @@ To install the necessary components for NeuroMPET, please follow the steps below
   ```
 
 ## Pipeline Modules & Options
-`Preprocessing` (image_prep.py)<br>
+1. `Preprocessing` (image_prep.py)<br>
 ► Executed with the *--run_preprocessing* flag<br>
 ► Inputs:<br>
    > *--input_im*: an NIfTI image<br>
@@ -82,9 +82,7 @@ To install the necessary components for NeuroMPET, please follow the steps below
    > *--rescale_max*: maximum value to use in rescaling (default: 1000)<br>
    > *--n4_bias_correct*: perform N4 bias correction (default: true)<br>
 
-<br><br>
-
-`Registration` (registration.py)<br>
+2. `Registration` (registration.py)<br>
 ► Executed with the *--run_registration* flag<br>
 ► Inputs:<br>
    > *--input_im*: an NIfTI image,<br>
@@ -93,9 +91,7 @@ To install the necessary components for NeuroMPET, please follow the steps below
 ► Other Parameters:<br>
    > *--reg_type*: type of registration, must match ANTs registration options (default: Affine)<br>
 
-<br><br>
-
-`Cortical Segmentation` (cortical_segmentation.py)<br>
+3. `Cortical Segmentation` (cortical_segmentation.py)<br>
 ► Executed with the *--run_cortical_segmentation* flag<br>
 ► Inputs:<br>
    > *--input_im*: an NIfTI image, or<br>
@@ -107,14 +103,11 @@ To install the necessary components for NeuroMPET, please follow the steps below
    > *--big_vents*: add flag to FreeSurfer command to aid in processing of subjects with large ventricles (default: false)<br>
    > *--large_FOV*: add flag to FreeSurfer command to aid in processing of subjects with large FOV (default: false)<br>
 
-<br><br>
-
-`Ventricular Segmentation` (manually with ITK-SNAP)<br>
+4. `Ventricular Segmentation` (manually with ITK-SNAP)<br>
 ► Currently, the output segmentations for the ventricles from FreeSurfer are disjointed and require manual fixing
 ► Future work will implement improved ventricular segmentation to remove this step
-<br><br>
 
-`Surface Generation` (surface_generation.py)<br>
+5. `Surface Generation` (surface_generation.py)<br>
 ► Executed with the *--run_surface_generation* flag<br>
 ► Inputs:<br>
    > *--segmentation_dir*: a folder of NIfTI binary segmentation files, or<br>
@@ -125,9 +118,7 @@ To install the necessary components for NeuroMPET, please follow the steps below
    > *--generate_global*: generate a global surface by subtracting the ventricles from wholebrain (default: true)<br>
    > *--fs_surfaces*: generate .stl files using FreeSurfer tools, else use pyvista (default: false)<br>
 
-<br><br>
-
-`Mesh Generation` (mesh_generation.py)<br>
+6. `Mesh Generation` (mesh_generation.py)<br>
 ► Currently the script cannot be executed in Simpleware via the command line
 ► Future work will implement automated processing of the script to remove the need to run in the Simpleware GUI.
 ► Inputs:<br>
@@ -139,9 +130,7 @@ To install the necessary components for NeuroMPET, please follow the steps below
    > *--target_global_elements*: target element count for global mesh (default: 2_500_000)<br>
    > *--tolerance_frac*: tolerance fraction for actual elements vs target elements (default: 0.2)<br>
 
-<br><br>
-
-`Mesh Mapping` (mesh_map.py)<br>
+7. `Mesh Mapping` (mesh_map.py)<br>
 ► Executed with the *--run_mesh_mapping* flag<br>
 ► Inputs:<br>
    > *--mesh_dir*: a folder of .vtk format mesh files,<br>
@@ -155,9 +144,7 @@ To install the necessary components for NeuroMPET, please follow the steps below
    > *--generate_cbf_map*: generate an CBF scalar map from a CBF NIfti image supplied with --cbf_dir (default: false)<br>
    > *--generate_fa_map*: generate an FA scalar map from a FA NIfti image supplied with --dwi_dir (default: false)<br>
 
-<br><br>
-
-`MPET Solver` (solver.py)<br>
+8. `MPET Solver` (solver.py)<br>
 ► Executed with the *--run_modelling* flag<br>
 ► Inputs:<br>
    > *--mesh_dir*: a folder of .vtk format mesh files, and<br>
@@ -170,7 +157,6 @@ To install the necessary components for NeuroMPET, please follow the steps below
    > *--timestep_count*: number of time steps per boundary condition waveform (default: 10)<br>
    > *--timestep_interval*: interval between two VTU output files (default: 100)<br>
 
-<br>
 
 ## Output Structure
 
