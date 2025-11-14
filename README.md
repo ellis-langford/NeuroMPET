@@ -81,6 +81,7 @@ To install the necessary components for NeuroMPET, please follow the steps below
    > *--wm_peak_scaling*: scale intensities using WM peak, else linear scaling (default: false)<br>
    > *--rescale_max*: maximum value to use in rescaling (default: 1000)<br>
    > *--n4_bias_correct*: perform N4 bias correction (default: true)<br>
+
 <br><br>
 
 `Registration` (registration.py)<br>
@@ -91,6 +92,7 @@ To install the necessary components for NeuroMPET, please follow the steps below
 
 ► Other Parameters:<br>
    > *--reg_type*: type of registration, must match ANTs registration options (default: Affine)<br>
+
 <br><br>
 
 `Cortical Segmentation` (cortical_segmentation.py)<br>
@@ -104,6 +106,7 @@ To install the necessary components for NeuroMPET, please follow the steps below
    > *--regions*: list of regions to process, defaults to 7 cortical regions<br>
    > *--big_vents*: add flag to FreeSurfer command to aid in processing of subjects with large ventricles (default: false)<br>
    > *--large_FOV*: add flag to FreeSurfer command to aid in processing of subjects with large FOV (default: false)<br>
+
 <br><br>
 
 `Ventricular Segmentation` (manually with ITK-SNAP)<br>
@@ -121,6 +124,7 @@ To install the necessary components for NeuroMPET, please follow the steps below
    > *--regions*: list of regions to process, defaults to 7 cortical regions<br>
    > *--generate_global*: generate a global surface by subtracting the ventricles from wholebrain (default: true)<br>
    > *--fs_surfaces*: generate .stl files using FreeSurfer tools, else use pyvista (default: false)<br>
+
 <br><br>
 
 `Mesh Generation` (mesh_generation.py)<br>
@@ -134,6 +138,7 @@ To install the necessary components for NeuroMPET, please follow the steps below
    > *--coarseness_steps*: number of coarsness values to try when generating mesh (default: 15)<br>
    > *--target_global_elements*: target element count for global mesh (default: 2_500_000)<br>
    > *--tolerance_frac*: tolerance fraction for actual elements vs target elements (default: 0.2)<br>
+
 <br><br>
 
 `Mesh Mapping` (mesh_map.py)<br>
@@ -149,6 +154,7 @@ To install the necessary components for NeuroMPET, please follow the steps below
    > *--adjust_outer_labels*: adjust outer labels of the mesh based on a wholebrain.stl file supplied with --surface_dir (default: false)<br>
    > *--generate_cbf_map*: generate an CBF scalar map from a CBF NIfti image supplied with --cbf_dir (default: false)<br>
    > *--generate_fa_map*: generate an FA scalar map from a FA NIfti image supplied with --dwi_dir (default: false)<br>
+
 <br><br>
 
 `MPET Solver` (solver.py)<br>
@@ -163,6 +169,7 @@ To install the necessary components for NeuroMPET, please follow the steps below
    > *--timestep_size*: size of timestep (default: 0.1)<br>
    > *--timestep_count*: number of time steps per boundary condition waveform (default: 10)<br>
    > *--timestep_interval*: interval between two VTU output files (default: 100)<br>
+
 <br>
 
 ## Output Structure
@@ -207,14 +214,14 @@ Output directory
 ├── logs
 ├── results.txt
 └── errors.txt
-
 ```
-► `inputs:` contains a copy of the input images
-► `interim_outputs`: contains copies of files with various stages of processing applied
-► `logs:` contains a plugin log (log.txt) and a record of the inputs and parameters (options.txt)
-► `outputs:` contains the final output files
-► `results.txt:` only produced if the pipeline executes successfully
-► `errors.txt:` only produced if the pipeline fails to execute successfully (contains error info)
+<br>
+► `inputs:` contains a copy of the input images<br>
+► `interim_outputs`: contains copies of files with various stages of processing applied<br>
+► `logs:` contains a plugin log (log.txt) and a record of the inputs and parameters (options.txt)<br>
+► `outputs:` contains the final output files<br>
+► `results.txt:` only produced if the pipeline executes successfully<br>
+► `errors.txt:` only produced if the pipeline fails to execute successfully (contains error info)<br>
 
 
 ## Citation
