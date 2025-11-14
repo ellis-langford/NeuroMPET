@@ -69,94 +69,94 @@ To install the necessary components for NeuroMPET, please follow the steps below
   ```
 
 ## Pipeline Modules & Options
-`Preprocessing` (image_prep.py)
-- Executed with the *--run_preprocessing* flag
-- Inputs:
-   > *--input_im*: an NIfTI image
-- Optional Parameters:
+`Preprocessing` (image_prep.py)<br>
+Executed with the *--run_preprocessing* flag<br>
+Inputs:<br>
+   > *--input_im*: an NIfTI image<br>
+Optional Parameters:<br>
    > *--modality*: modality of image to be analysed (default: t1)<br>
    > *--reset_origin*: reset image origin (default: True)<br>
    > *--normalise_intensities*: normalise image intensities (default: true)<br>
    > *--wm_peak_scaling*: scale intensities using WM peak, else linear scaling (default: false)<br>
    > *--rescale_max*: maximum value to use in rescaling (default: 1000)<br>
    > *--n4_bias_correct*: perform N4 bias correction (default: true)<br>
+<br><br>
 
-
-`Registration` (registration.py)
-- Executed with the *--run_registration* flag
-- Inputs:
+`Registration` (registration.py)<br>
+Executed with the *--run_registration* flag<br>
+Inputs:<br>
    > *--input_im*: an NIfTI image,<br>
-   > *--input_atlas* (optional): atlas to register input image to (default: MNI atlas)
-- Other Parameters:
+   > *--input_atlas* (optional): atlas to register input image to (default: MNI atlas)<br>
+Other Parameters:<br>
    > *--reg_type*: type of registration, must match ANTs registration options (default: Affine)<br>
+<br><br>
 
-
-`Cortical Segmentation` (cortical_segmentation.py)
-- Executed with the *--run_cortical_segmentation* flag
-- Inputs:
+`Cortical Segmentation` (cortical_segmentation.py)<br>
+Executed with the *--run_cortical_segmentation* flag<br>
+Inputs:<br>
    > *--input_im*: an NIfTI image, or<br>
-   > *--freesurfer_outputs*: a folder of FreeSurfer outputs
-- Other Parameters:
+   > *--freesurfer_outputs*: a folder of FreeSurfer outputs<br>
+Other Parameters:<br>
    > *--subject_id*: subjectID of data, used in logging only<br>
    > *--regions*: list of regions to process, defaults to 7 cortical regions<br>
    > *--big_vents*: add flag to FreeSurfer command to aid in processing of subjects with large ventricles (default: false)<br>
    > *--large_FOV*: add flag to FreeSurfer command to aid in processing of subjects with large FOV (default: false)<br>
+<br><br>
 
-
-`Ventricular Segmentation` (manually with ITK-SNAP)
+`Ventricular Segmentation` (manually with ITK-SNAP)<br>
 - Currently, the output segmentations for the ventricles from FreeSurfer are disjointed and require manual fixing
 - Future work will implement improved ventricular segmentation to remove this step
+<br><br>
 
-
-`Surface Generation` (surface_generation.py)
-- Executed with the *--run_surface_generation* flag
-- Inputs:
+`Surface Generation` (surface_generation.py)<br>
+Executed with the *--run_surface_generation* flag<br>
+Inputs:<br>
    > *--segmentation_dir*: a folder of NIfTI binary segmentation files, or<br>
-   > --segmentations*: a comma seperated list of NIfTI binary segmentation files
-- Other Parameters:
+   > --segmentations*: a comma seperated list of NIfTI binary segmentation files<br>
+Other Parameters:<br>
    > *--regions*: list of regions to process, defaults to 7 cortical regions<br>
    > *--generate_global*: generate a global surface by subtracting the ventricles from wholebrain (default: true)<br>
    > *--fs_surfaces*: generate .stl files using FreeSurfer tools, else use pyvista (default: false)<br>
+<br><br>
 
-
-`Mesh Generation` (mesh_generation.py)
+`Mesh Generation` (mesh_generation.py)<br>
 - Currently the script cannot be executed in Simpleware via the command line
 - Future work will implement automated processing of the script to remove the need to run in the Simpleware GUI.
-- Inputs:
-   > *--surface_dir*: a folder of .stl surface files
-- Other Parameters:
+Inputs:<br>
+   > *--surface_dir*: a folder of .stl surface files<br>
+Other Parameters:<br>
    > *--starting_coarseness*: dictionary of mesh coarseness values to start iterations from (default: -50 for all)<br>
    > *--coarseness_steps*: number of coarsness values to try when generating mesh (default: 15)<br>
    > *--target_global_elements*: target element count for global mesh (default: 2_500_000)<br>
    > *--tolerance_frac*: tolerance fraction for actual elements vs target elements (default: 0.2)<br>
+<br><br>
 
-
-`Mesh Mapping` (mesh_map.py)
-- Executed with the *--run_mesh_mapping* flag
-- Inputs:
+`Mesh Mapping` (mesh_map.py)<br>
+Executed with the *--run_mesh_mapping* flag<br>
+Inputs:<br>
    > *--mesh_dir*: a folder of .vtk format mesh files,<br>
    > *--surface_dir* (optional): a folder containing a wholebrain.stl file to be used for outer surface fixing,<br>
    > *--dwi_dir* (optional): a folder containing DWI input images,<br>
-   > *--cbf_dir* (optional): a folder containing CBF input images
-- Other Parameters:
+   > *--cbf_dir* (optional): a folder containing CBF input images<br>
+Other Parameters:<br>
    > *--adjust_labels_dwi*: adjust mesh labels based on DWI inputs supplied with --dwi_dir (default: false)<br>
    > *--adjust_outer_labels*: adjust outer labels of the mesh based on a wholebrain.stl file supplied with --surface_dir (default: false)<br>
    > *--generate_cbf_map*: generate an CBF scalar map from a CBF NIfti image supplied with --cbf_dir (default: false)<br>
    > *--generate_fa_map*: generate an FA scalar map from a FA NIfti image supplied with --dwi_dir (default: false)<br>
+<br><br>
 
-
-`MPET Solver` (solver.py)
-- Executed with the *--run_modelling* flag
-- Inputs:
+`MPET Solver` (solver.py)<br>
+Executed with the *--run_modelling* flag<br>
+Inputs:<br>
    > *--mesh_dir*: a folder of .vtk format mesh files, and<br>
    > *--surface_dir*: a folder containing a wholebrain.stl and ventricles.stl file to be used in creation of .bit file,<br>
    > *--labels_fpath*: path to an ROI labels .txt file,<br>
-   > *--bc_fpath* (optional): path to a boundary condition .csv file (default: general healthy control BC file)
-- Other Parameters:
+   > *--bc_fpath* (optional): path to a boundary condition .csv file (default: general healthy control BC file)<br>
+Other Parameters:<br>
    > *--timestep_size*: size of timestep (default: 0.1)<br>
    > *--timestep_count*: number of time steps per boundary condition waveform (default: 10)<br>
    > *--timestep_interval*: interval between two VTU output files (default: 100)<br>
-
+<br>
 
 ## Output Structure
 
