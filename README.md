@@ -111,8 +111,8 @@ To install the necessary components for NeuroMPET, please follow the steps below
 ***
 `Ventricular Segmentation`<br>
 ► Manual with ITK-SNAP<br>
-► Currently, the output segmentations for the ventricles from FreeSurfer are disjointed and require manual fixing
-► Future work will implement improved ventricular segmentation to remove this step
+► Currently, the output segmentations for the ventricles from FreeSurfer are disjointed and require manual fixing<br>
+► Future work will implement improved ventricular segmentation to remove this step<br>
 
 ***
 `Surface Generation`<br>
@@ -130,8 +130,8 @@ To install the necessary components for NeuroMPET, please follow the steps below
 ***
 `Mesh Generation`<br>
 ► mesh_generation.py<br>
-► Currently the script cannot be executed in Simpleware via the command line
-► Future work will implement automated processing of the script to remove the need to run in the Simpleware GUI.
+► Currently the script cannot be executed in Simpleware via the command line<br>
+► Future work will implement automated processing of the script to remove the need to run in the Simpleware GUI.<br>
 ► Inputs:<br>
    > *--surface_dir*: a folder of .stl surface files<br>
 
