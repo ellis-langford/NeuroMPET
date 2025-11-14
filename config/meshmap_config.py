@@ -10,10 +10,10 @@ PARAMETERS = {
         "default": "",
         "help": "Path to directory containing mesh .vtk files"
     },
-    "outer_surface_fpath": {
+    "surface_dir": {
         "type": str,
         "default": "",
-        "help": "Path to outer surface (wholebrain) .stl file"
+        "help": "Path to directory containing surface .stl files"
     },
     "dwi_dir": {
         "type": str,

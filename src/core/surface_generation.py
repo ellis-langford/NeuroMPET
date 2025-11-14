@@ -8,19 +8,63 @@ import numpy as np
 import ants
 import trimesh
 import shutil
+from skimage import measure
+import pyvista as pv
 
 class SurfaceGen(object):
     """Class setup"""
     def __init__(self, plugin_obj):
         # Check all expected attributed are present
-        to_inherit = ["loggers", "parameters", "base_dir", 
-                      "input_dir", "interim_dir", "output_dir", "log_dir"]
+        to_inherit = ["loggers", "parameters", "base_dir", "input_dir",
+                      "interim_dir", "output_dir", "log_dir"]
         for attr in to_inherit:
             try:
                 setattr(self, attr, getattr(plugin_obj, attr))
             except AttributeError as e:
                 print(f"Attribute Error - {e}")
                 sys.exit(1)
+
+    def generate_surface_pv(self, region):
+        """
+        Generate surfaces using skimage and pyvista
+        """
+        # Global composite
+        if region == "global":
+            # Define paths
+            wb_bin = glob.glob(os.path.join(self.segmentation_dir, f"*wholebrain*.nii.gz"))[0]
+            vent_bin = glob.glob(os.path.join(self.segmentation_dir, f"*ventricles*.nii.gz"))[0]
+
+            # Get data
+            vent_data = nib.load(vent_bin).get_fdata()
+            wb_data = nib.load(wb_bin).get_fdata()
+
+            # Subtract vents from wholebrain
+            data = np.where(vent_data > 0, 0, wb_data)
+            affine = nib.load(wb_bin).affine
+
+        # Other regions
+        else:
+            bin_data = glob.glob(os.path.join(self.segmentation_dir, f"*{region}*.nii.gz"))[0]
+            data = nib.load(bin_data).get_fdata()
+            affine = nib.load(bin_data).affine
+        
+        verts, faces, _, _ = measure.marching_cubes(data, level=0.5)
+        verts_hom = np.hstack([verts, np.ones((verts.shape[0], 1))])
+        verts_world = (affine @ verts_hom.T).T[:, :3]
+        faces_pv = np.hstack([np.full((faces.shape[0], 1), 3), faces]).astype(np.int32)
+        
+        # Create PyVista mesh
+        mesh = pv.PolyData(verts_world, faces_pv)
+        mesh = mesh.connectivity(extraction_mode='largest') # Remove disconnected pieces
+        mesh = mesh.smooth(n_iter=50, relaxation_factor=0.01) # Laplacian smoothing
+        mesh = mesh.clean()  # Remove duplicate, unused and degenerate points
+
+        outpath = os.path.join(self.output_dir, "surfaces", f"{region}.stl")
+        os.makedirs(os.path.join(self.output_dir, "surfaces"), exist_ok=True)
+        mesh.save(outpath)
+
+        if not os.path.exists(outpath):
+            self.loggers.errors(f"Surface generation failed for {region}")
 
     def tessellate(self, region):
         """
@@ -125,10 +169,25 @@ class SurfaceGen(object):
         if not os.path.exists(geo_out):
             self.loggers.errors(f"Cleaning of {region} .stl failed")
 
-    def prepare_geometry(self, region):
+    def generate_surface_fs(self, region):
         """
-        Binarises, tessellates, smooths, converts and cleans volume to .stl
+        Binarises, tessellates, smooths, converts and cleans volume to .stl using FreeSurfer
         """
+        if region == "global":
+            # Load global binary and ventricle mask
+            wholebrain_seg = nib.load(glob.glob(os.path.join(self.segmentation_dir, "*wholebrain*.nii.gz"))[0])
+            vent_seg = nib.load(glob.glob(os.path.join(self.segmentation_dir, "*ventricles*.nii.gz"))[0])
+            wholebrain_data = wholebrain_seg.get_fdata()
+            vent_data = vent_seg.get_fdata()
+        
+            # Subtract ventricles (make sure masks are binary)
+            result_data = np.where((wholebrain_data > 0) & (vent_data == 0), 1, 0)
+        
+            # Step 4: Save result
+            result_img = nib.Nifti1Image(result_data.astype(np.uint8), affine=wholebrain_seg.affine)
+            result_out_fpath = os.path.join(self.segmentation_dir, "global_bin.nii.gz")
+            nib.save(result_img, result_out_fpath)
+        
         # Outputdir
         os.makedirs(os.path.join(self.interim_dir, f"{region}"), exist_ok=True)
         
@@ -151,32 +210,16 @@ class SurfaceGen(object):
                 self.loggers.errors(f"Geometry generation failed - " +
                                     f"required output missing ({output})")
 
-    def generate_global_surface(self):
-        """
-        Generate global mesh file
-        (all regions minus ventricles)
-        """
-        if "wholebrain" not in self.regions or "ventricles" not in self.regions:
-            self.loggers.errors("Wholebrain and ventricles segmentations must be provided if --generate_global is True")
-            
-        # Load global binary and ventricle mask
-        wholebrain_seg = nib.load(glob.glob(os.path.join(self.segmentation_dir, "*wholebrain*.nii.gz"))[0])
-        vent_seg = nib.load(glob.glob(os.path.join(self.segmentation_dir, "*ventricles*.nii.gz"))[0])
-        wholebrain_data = wholebrain_seg.get_fdata()
-        vent_data = vent_seg.get_fdata()
-    
-        # Subtract ventricles (make sure masks are binary)
-        result_data = np.where((wholebrain_data > 0) & (vent_data == 0), 1, 0)
-    
-        # Step 4: Save result
-        result_img = nib.Nifti1Image(result_data.astype(np.uint8), affine=wholebrain_seg.affine)
-        result_out_fpath = os.path.join(self.segmentation_dir, "global_bin.nii.gz")
-        nib.save(result_img, result_out_fpath)
-
     def run_surface_gen(self):
         """
         Run surface .stl generation
         """
+        # Error check
+        self.regions = self.parameters["regions"].split(",")
+        if "wholebrain" not in self.regions or "ventricles" not in self.regions:
+            self.loggers.errors(f"Wholebrain and ventricles segmentations must be"
+                                f" provided if --generate_global is True")
+            
         # Directories
         if self.parameters["segmentation_dir"] or self.parameters["segmentations"]:
             self.segmentation_dir = os.path.join(self.input_dir, "segmentations")
@@ -185,20 +228,14 @@ class SurfaceGen(object):
             
         self.interim_dir = os.path.join(self.interim_dir, "surface_generation")
         os.makedirs(self.interim_dir, exist_ok=True)
-
-        # Freesurfer setup
-        self.freesurfer_source = "source $FREESURFER_HOME/SetUpFreeSurfer.sh && "
-        self.freesurfer_env = os.environ.copy()
-        self.freesurfer_env["SUBJECTS_DIR"] = self.interim_dir
         
         # Create other ROI geometries
         self.loggers.plugin_log(f"Creating region surface files")
-        self.regions = self.parameters["regions"].split(",")
         for region in self.regions:
-            self.prepare_geometry(region)
-
-        # Create global seg and surface (wholebrain minus ventricles)
-        self.loggers.plugin_log(f"Creating global surface file")
+            if self.parameters["fs_surfaces"]:
+                self.generate_surface_fs(region)
+            else:
+                self.generate_surface_pv(region)
         if self.parameters["generate_global"]:
-                self.generate_global_surface()
-                self.prepare_geometry("global")
+            self.loggers.plugin_log(f"Creating global surface file")
+            self.generate_surface_pv("global")

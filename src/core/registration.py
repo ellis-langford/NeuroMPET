@@ -115,7 +115,7 @@ class Registration(object):
         """
         # Define input image
         if self.parameters ["run_preprocessing"]:
-            self.input_im = os.path.join(self.output_dir, "image.nii.gz")
+            self.input_im = os.path.join(self.output_dir, "preprocessed_im.nii.gz")
         else:
             self.input_im = os.path.join(self.input_dir, "image.nii.gz")
 

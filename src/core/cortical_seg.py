@@ -37,12 +37,6 @@ class FreeSurfer(object):
             if self.parameters[_input]:
                 self.freesurfer_command += f" -{tag}"
 
-        # if self.parameters["run_preprocessing"]:
-        #     if self.parameters["normalise_intensities"] or self.parameters["n4_bias_correct"]:
-        #         self.freesurfer_command += " -nonormalization"
-        # else:
-        #     self.freesurfer_command += " -nonormalization"
-
     def run_freesurfer(self):
         """
         Run Freesurfer.
@@ -57,13 +51,21 @@ class FreeSurfer(object):
                                              stdout=outfile,
                                              stderr=subprocess.STDOUT,
                                              env=self.freesurfer_env)
+
+        # Copy outputs regardless of success
+        shutil.copytree(os.path.join(self.tmp_dir, self.parameters["subject_id"]), 
+                        os.path.join(self.interim_dir, "fs_outputs"))
+        if os.path.isdir(os.path.join(self.interim_dir, "fs_outputs")):
+            shutil.rmtree(os.path.join(self.tmp_dir, self.subject_id))
+
+        # Produce error if failed to process
         if freesurfer_sub.returncode != 0:
             self.loggers.errors(f"Freesurfer execution returned non-zero exit status - " +
                                 f"please check log file at {self.freesurfer_log}")
 
         # Check required outputs have been produced
-        segmentation = os.path.join(self.tmp_dir, self.subject_id, "mri", "aseg.mgz")
-        output_im    = os.path.join(self.tmp_dir, self.subject_id, "mri", "T1.mgz")
+        segmentation = os.path.join(os.path.join(self.interim_dir, "fs_outputs"), "mri", "aseg.mgz")
+        output_im    = os.path.join(os.path.join(self.interim_dir, "fs_outputs"), "mri", "T1.mgz")
         if not os.path.exists(segmentation):
             self.loggers.errors(f"Freesurfer has not produced a segmentation at {segmentation}" +
                                 f"- please check log file at {self.freesurfer_log}")
@@ -71,9 +73,6 @@ class FreeSurfer(object):
             self.loggers.errors(f"Freesurfer has not produced an output image at {output_im} - " +
                                 f"please check log file at {self.freesurfer_log}")
         else:
-            shutil.copytree(os.path.join(self.tmp_dir, self.parameters["subject_id"]), os.path.join(self.interim_dir, "fs_outputs"))
-            # if os.path.isdir(os.path.join(self.interim_dir, "segmentation")):
-            #     shutil.rmtree(os.path.join(self.tmp_dir, self.subject_id))
             self.loggers.plugin_log("Freesurfer run successfully")
 
     def convert_T1(self):
@@ -99,7 +98,7 @@ class FreeSurfer(object):
             self.loggers.errors("Conversion of T1.mgz to T1.nii.gz failed - " +
                                f"please check log file at {conversion_log}")
         else:
-            shutil.copy(self.T1_out, os.path.join(self.output_dir, "fs_T1.nii.gz"))
+            shutil.copy(self.T1_out, os.path.join(self.output_dir, "fs_im.nii.gz"))
 
     def convert_seg(self):
         """

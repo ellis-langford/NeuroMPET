@@ -3,6 +3,7 @@ import os
 import sys
 import glob
 import numpy as np
+import pyvista as pv
 import meshio
 from collections import defaultdict
 
@@ -102,7 +103,7 @@ class MeshLoaders(object):
     
             # Save as txt
             base, _ = os.path.splitext(mesh_path)
-            info_path = base + "_clean.vtk"
+            info_path = base + ".vtk"
             with open(info_path, "w") as f: 
                 f.write(content)
 
@@ -196,54 +197,51 @@ class MeshLoaders(object):
             # Save tetrahedral neighbours
             np.savetxt(os.path.join(output_dir, f"{region}_tetra_neighbours.txt"), tetra_neighbours, fmt="%d")
 
-    def convert_to_vtk4_legacy(self, mesh_file):
+    def convert_and_export_custom_mesh(self, vtk_path, wholebrain_stl, ventricles_stl, output_file):
         """
-        Convert VTK 5.x unstructured grid file (with OFFSETS/CONNECTIVITY)
-        into legacy CELLS format for compatibility with solver
+        Converts a Simpleware VTK file (VTK5 or VTK4 format) + surface STLs (outer & inner)
+        into a custom .bit mesh format with $Node, $OuterFaceCell, $InnerFaceCell, $TetraCell sections.
 
         Parameters:
         ---
-        mesh_file (str) : Path input mesh .vtk file to convert
+        vtk_path (str) : Path to .vtk mesh file
+        wholebrain_stl (str) : Path to wholebrain .stl surface
+        ventricles_stl (str) : Path to ventricles .stl surface
+        output_file (str) : Path output .bit file destination
         """
-        # Read input file
-        with open(mesh_file, "r") as f:
+        # Convert from new to legacy format
+        with open(vtk_path, "r") as f:
             lines = f.read().splitlines()
-
-        if not any(line.strip().startswith("OFFSETS") for line in lines):
-            return mesh_file
-        else:
-            out = []
-            offsets = []
-            connectivity = []
-            num_cells = 0
+    
+        if any(line.strip().startswith("OFFSETS") for line in lines):
+            converted_path = vtk_path.replace(".vtk", "_legacy.vtk")
+            out_lines = []
+            offsets, connectivity = [], []
             i = 0
-        
             while i < len(lines):
                 line = lines[i].strip()
-        
-                # Update header version
+                # Replace header version
                 if line.startswith("# vtk DataFile"):
-                    out.append("# vtk DataFile Version 4.2")
-        
-                # Rebuild CELLS section
+                    out_lines.append("# vtk DataFile Version 4.2")
+    
                 elif line.startswith("CELLS"):
                     parts = line.split()
                     num_cells = int(parts[1])
                     i += 1
-        
-                    # Read OFFSETS section
+    
+                    # Read OFFSETS
                     i += 1
                     while not lines[i].startswith("CONNECTIVITY"):
                         offsets.extend(map(int, lines[i].split()))
                         i += 1
-        
-                    # Read CONNECTIVITY section
-                    i += 1  # Skip "CONNECTIVITY ..." line
+    
+                    # Read CONNECTIVITY
+                    i += 1  # skip CONNECTIVITY line
                     while not lines[i].startswith("CELL_TYPES"):
                         connectivity.extend(map(int, lines[i].split()))
                         i += 1
-        
-                    # Convert OFFSETS/CONNECTIVITY into legacy CELLS lines
+    
+                    # Reconstruct legacy CELLS block
                     cell_lines = []
                     prev = 0
                     for off in offsets:
@@ -253,18 +251,112 @@ class MeshLoaders(object):
                         cell_lines.append(f"{len(cell_nodes)} " + " ".join(map(str, cell_nodes)))
                         prev = off
                     total_ints = num_cells + len(connectivity)
-                    out.append(f"CELLS {num_cells} {total_ints}")
-                    out.extend(cell_lines)
-        
-                    # Skip to CELL_TYPES
-                    continue
-                else:
-                    out.append(line)
-                i += 1
-        
-            # Write output file
-            outpath = os.path.join(os.path.dirname(mesh_file), "global_legacy.vtk")
-            with open(outpath, "w") as f:
-                f.write("\n".join(out))
+                    out_lines.append(f"CELLS {num_cells} {total_ints}")
+                    out_lines.extend(cell_lines)
     
-        return outpath
+                    # Skip directly to CELL_TYPES
+                    continue
+    
+                else:
+                    out_lines.append(line)
+                i += 1
+    
+            with open(converted_path, "w") as f:
+                f.write("\n".join(out_lines))
+            vtk_path = converted_path
+    
+        # Get POINTS (tetra coords) from vtk
+        with open(vtk_path, "r") as f:
+            lines = f.readlines()
+    
+        point_idx = next(i for i, l in enumerate(lines) if l.strip().startswith("POINTS"))
+        n_points = int(lines[point_idx].split()[1])
+    
+        coords = []
+        i = point_idx + 1
+        while len(coords) < 3 * n_points:
+            vals = lines[i].strip().split()
+            coords.extend([float(v) for v in vals])
+            i += 1
+        points = np.array(coords).reshape((n_points, 3))
+    
+        # GET CELLLS (tetra indices) from vtk
+        cell_idx = next(i for i, l in enumerate(lines) if l.strip().startswith("CELLS"))
+        n_cells = int(lines[cell_idx].split()[1])
+        total_entries = int(lines[cell_idx].split()[2])
+    
+        tetra_lines = []
+        entries_read = 0
+        i = cell_idx + 1
+        while entries_read < total_entries:
+            vals = lines[i].strip().split()
+            entries_read += len(vals)
+            tetra_lines.append(vals)
+            i += 1
+        tets = [l for l in tetra_lines if len(l) == 5 and l[0] == "4"]
+    
+        # Classify into inner or outer surfaces
+        cell_list = []
+        for l in tets:
+            cell_list.extend([4] + [int(v) for v in l[1:]])
+        cells = np.array(cell_list, dtype=np.int64)
+        celltypes = np.full(len(tets), pv.CellType.TETRA, dtype=np.uint8)
+    
+        grid = pv.UnstructuredGrid(cells, celltypes, points)
+        surf = grid.extract_surface().clean()
+    
+        wb_surf = pv.read(wholebrain_stl)
+        vent_surf = pv.read(ventricles_stl)
+    
+        # Compute signed distance field
+        dist_field = surf.compute_implicit_distance(vent_surf)
+        dist_key = next((k for k in dist_field.point_data.keys() if "distance" in k.lower()), None)
+        distances = dist_field.point_data[dist_key]
+    
+        faces = surf.faces.reshape(-1, 4)[:, 1:4]
+        face_dists = np.mean(distances[faces], axis=1)
+        inner_mask = face_dists < 0
+        outer_mask = ~inner_mask
+    
+        inner_faces = faces[inner_mask]
+        outer_faces = faces[outer_mask]
+    
+        surf_outer = pv.PolyData(surf.points, np.hstack([np.full((len(outer_faces), 1), 3), outer_faces]))
+        surf_outer = surf_outer.connectivity(extraction_mode="largest")
+    
+        surf_inner = pv.PolyData(surf.points, np.hstack([np.full((len(inner_faces), 1), 3), inner_faces]))
+        surf_inner = surf_inner.connectivity(extraction_mode="largest")
+    
+        outer_faces = surf_outer.faces.reshape(-1, 4)[:, 1:4]
+        inner_faces = surf_inner.faces.reshape(-1, 4)[:, 1:4]
+    
+        # Write .bit file
+        with open(output_file, "w") as f:
+            # Nodes
+            f.write("$Node\n")
+            f.write(f"{len(points)}\n")
+            for i, (x, y, z) in enumerate(points):
+                f.write(f"{i+1} {x:.6e} {y:.6e} {z:.6e}\n")
+    
+            # Outer Face
+            f.write("$OuterFaceCell\n")
+            f.write(f"{len(outer_faces)}\n")
+            for tri in outer_faces:
+                f.write(f"3 o {tri[0]+1} {tri[1]+1} {tri[2]+1}\n")
+    
+            # Inner Face
+            f.write("$InnerFaceCell\n")
+            f.write(f"{len(inner_faces)}\n")
+            for tri in inner_faces:
+                f.write(f"3 i {tri[0]+1} {tri[1]+1} {tri[2]+1}\n")
+
+            # Tetrahedra
+            f.write("$TetraCell\n")
+            f.write(f"{len(tets)}\n")
+            for l in tets:
+                # l = ["4", n0, n1, n2, n3] → convert nodes to 1-based
+                n0 = int(l[1]) + 1
+                n1 = int(l[2]) + 1
+                n2 = int(l[3]) + 1
+                n3 = int(l[4]) + 1
+                f.write(f"4 {n0} {n1} {n2} {n3}\n")

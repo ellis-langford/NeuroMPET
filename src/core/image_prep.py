@@ -177,4 +177,4 @@ class ImagePrep(object):
             self.normalise_intensities(self.input_im, interim_outpath, self.parameters["rescale_max"])
         
         # Copy final image to output directory
-        shutil.copy(self.input_im, self.output_dir)         
+        shutil.copy(self.input_im, os.path.join(self.output_dir, "preprocessed_im.nii.gz"))         

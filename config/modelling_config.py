@@ -10,6 +10,11 @@ PARAMETERS = {
         "default": "",
         "help": "Path to directory containing mesh .vtk files"
     },
+    "surface_dir": {
+        "type": str,
+        "default": "",
+        "help": "Path to directory containing surface .stl files"
+    },
     "bc_fpath": {
         "type": str,
         "default": "",
@@ -23,7 +28,7 @@ PARAMETERS = {
     "timestep_size": {
         "type": float,
         "default": 0.1,
-        "help": "Time-step size (default: 0.1)"
+        "help": "Size of timestep (default: 0.1)"
     },
     "timestep_count": {
         "type": int,

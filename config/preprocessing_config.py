@@ -27,8 +27,8 @@ PARAMETERS = {
     },
     "wm_peak_scaling": {
         "type": bool,
-        "default": True,
-        "help": "If True, image intensities are scaled according to the white matter peak, else to a defined range (default: True)"
+        "default": False,
+        "help": "If True, image intensities are scaled according to the white matter peak, else to a defined range (default: False)"
     },
     "rescale_max": {
         "type": int,

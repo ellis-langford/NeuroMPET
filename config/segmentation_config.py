@@ -30,7 +30,7 @@ PARAMETERS = {
     "big_vents": {
         "type": bool,
         "default": False,
-        "help": "Aids processing if subject has enlarged ventricles (default: True)"
+        "help": "Aids processing if subject has enlarged ventricles (default: False)"
     },
     "large_FOV": {
         "type": bool,

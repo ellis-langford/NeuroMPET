@@ -26,5 +26,10 @@ PARAMETERS = {
         "type": bool,
         "default": True,
         "help": "If True, a global mesh will be created by subtracting ventricles from wholebrain (default: True)"
+    },
+    "fs_surfaces": {
+        "type": bool,
+        "default": False,
+        "help": "If True, region surfaces are generated using FreeSurfer, else use pyvista (default: False)"
     }
 }

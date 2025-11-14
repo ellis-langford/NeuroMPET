@@ -32,7 +32,7 @@ class Solver(object):
 
         # Define command
         self.solver_command = f"make clean && make && " + \
-                              f"./MPET3D '{self.mesh_file}' '{self.output_dir}' " + \
+                              f"./MPET3D '{self.bit_file}' '{self.output_dir}' " + \
                               f"{self.timestep_size} {self.timestep_count} " + \
                               f"{self.timestep_interval} '{self.boundary_conditions}' " + \
                               f"'{self.labels_file}'"
@@ -79,10 +79,21 @@ class Solver(object):
         
         # Run MPET solver
         if self.parameters["run_modelling"]:
-            # Convert file format for compatibility with solver
+            # Define meshes
             self.mesh_dir = os.path.join(self.input_dir, "meshes")
-            self.mesh_file = os.path.join(self.mesh_dir, "global", "global_clean.vtk")
-            self.mesh_file = self.mesh_loader.convert_to_vtk4_legacy(self.mesh_file)
+            self.mesh_file = os.path.join(self.mesh_dir, "global", "global.vtk")
+            
+            # Define surface files
+            self.surface_dir = os.path.join(self.input_dir, "surfaces")
+            self.wb_surface = glob.glob(os.path.join(self.surface_dir, "**", "*wholebrain*.stl"), recursive=True)[0]
+            self.vent_surface = glob.glob(os.path.join(self.surface_dir, "**", "*ventricles*.stl"), recursive=True)[0]
+
+            # Produce custom .bit file
+            self.bit_file = os.path.join(self.input_dir, "global.bit")
+            self.mesh_loader.convert_and_export_custom_mesh(self.mesh_file,
+                                                            self.wb_surface,
+                                                            self.vent_surface,
+                                                            self.bit_file)
     
             # Build solver command
             self.build_solver_command()

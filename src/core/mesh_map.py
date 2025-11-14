@@ -12,10 +12,8 @@ class MeshMap(object):
     """Class setup"""
     def __init__(self, plugin_obj):
         # Check all expected attributed are present
-        to_inherit = ["loggers", "parameters",
-                      "base_dir", "input_dir", "mesh_dir", 
-                      "surface_dir", "dwi_dir", "cbf_dir",
-                      "interim_dir", "output_dir", "log_dir"]
+        to_inherit = ["loggers", "parameters", "base_dir", "input_dir", "mesh_dir", 
+                      "surface_dir", "interim_dir", "output_dir", "log_dir"]
         for attr in to_inherit:
             try:
                 setattr(self, attr, getattr(plugin_obj, attr))
@@ -44,8 +42,8 @@ class MeshMap(object):
             self.mesh_loader.extract_mesh_info(region_mesh, self.regional_info_dir, region)
 
         # Extract outer surface stl information
-        if self.parameters["outer_surface_fpath"]:
-            outer_surface = glob.glob(os.path.join(self.surface_dir, "*.stl"))[0]
+        if self.parameters["surface_dir"]:
+            outer_surface = glob.glob(os.path.join(self.surface_dir, "**", "*wholebrain*.stl"), recursive=True)[0]
             self.surface_info_dir = os.path.join(self.interim_dir, "surface_info")            
             self.mesh_loader.extract_mesh_info(outer_surface, self.surface_info_dir, "outer_surface", cell_type="triangle")
 
@@ -441,6 +439,9 @@ class MeshMap(object):
         """
         self.interim_dir = os.path.join(self.interim_dir, "mesh_mapping")
         os.makedirs(self.interim_dir, exist_ok=True)
+
+        self.dwi_dir = os.path.join(self.input_dir, "dwi_files")
+        self.cbf_dir = os.path.join(self.input_dir, "cbf_files")
         
         regions = ["global", "ventricles", "brainstem_L", "brainstem_R",
                    "cerebrum_L", "cerebrum_R", "cerebrumWM_L", "cerebrumWM_R", 

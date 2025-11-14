@@ -12,3 +12,5 @@ meshio==5.3.5
 scipy==1.15.3
 trimesh==4.9.0
 networkx==3.4.2
+pyvista==0.46.4
+scikit-image==0.25.2

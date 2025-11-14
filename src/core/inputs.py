@@ -109,27 +109,52 @@ class Inputs(object):
         """
         Copy surface inputs to working directory
         """
-        self.surface_dir = os.path.join(self.input_dir, "surface_files")
+        self.surface_dir = os.path.join(self.input_dir, "surfaces")
+        os.makedirs(self.surface_dir)
         
-        if self.parameters["adjust_outer_labels"]:
-            if not self.parameters["outer_surface_fpath"]:
-                self.loggers.errors(f"An outer surface (wholebrain) .stl file must be provided "
-                                    f"with --outer_surface_fpath if --adjust_outer_labels is true")
+        # No surface_dir provided
+        if self.parameters["run_modelling"]:
+            if not self.parameters["surface_dir"]:
+                # No global.bit provided
+                if not os.path.isfile(os.path.join(self.input_dir, "meshes", "global.bit")):
+                    self.loggers.errors(f"If no global.bit file provided in --mesh_dir. A wholebrain.stl "
+                                        f"and ventricles.stl must be provided with --surface_dir")
+            # Check that wholebrain and ventricle surface provided
+            try:
+                wb_surface = glob.glob(os.path.join(self.parameters["surface_dir"], "**", "*wholebrain*.stl"), recursive=True)[0]
+                vent_surface = glob.glob(os.path.join(self.parameters["surface_dir"], "**", "*ventricles*.stl"), recursive=True)[0]
+            except:
+                self.loggers.errors(f"A wholebrain.stl and ventricles.stl must be provided with --surface_dir"
+                                    f" if --run_modelling is true and no global.bit provided")
+                
+            # Copy to working directory
+            shutil.copy(wb_surface, os.path.join(self.surface_dir, "wholebrain.stl"))
+            shutil.copy(vent_surface, os.path.join(self.surface_dir, "ventricles.stl"))
+
+        # No surface_dir provided
+        elif self.parameters["adjust_outer_labels"]:
+            if not self.parameters["surface_dir"]:
+                self.loggers.errors(f"A wholebrain surface must be provided with "
+                                    f"--surface_dir if --adjust_outer_labels is true")
+            # No wholebrain surface provided
+            # Check that wholebrain surface provided
+            try:
+                wb_surface = glob.glob(os.path.join(self.parameters["surface_dir"], "**", "*wholebrain*.stl"), recursive=True)[0]
+            except:
+                self.loggers.errors(f"A wholebrain surface must be provided with "
+                                    f"--surface_dir if --adjust_outer_labels is true")
+            # Copy to working directory
             else:
-                if not os.path.isfile(self.parameters["outer_surface_fpath"]):
-                    self.loggers.errors(f"Outer surface .stl file --outer_surface_fpath does not exist {self.parameters['outer_surface_fpath']}")
-                else:
-                    # Copy to working directory
-                    shutil.copy(self.parameters["outer_surface_fpath"], self.surface_dir)
+                shutil.copytree(wb_surface, os.path.join(self.surface_dir, "wholebrain.stl"))
         
     def prepare_dwi_inputs(self):
         """
         Prepare diffusion weighted imaging inputs
         """
-        self.dwi_dir = os.path.join(self.input_dir, "dwi_files")
-        os.makedirs(self.dwi_dir, exist_ok=True)
-        
         if self.parameters["adjust_labels_dwi"] or self.parameters["generate_fa_map"]:
+            self.dwi_dir = os.path.join(self.input_dir, "dwi_files")
+            os.makedirs(self.dwi_dir, exist_ok=True)
+            
             if not self.parameters["dwi_dir"]:
                 self.loggers.errors(f"Directory containing diffusion weighted imaging files must be provided "
                                     f"with --dwi_dir if --adjust_labels_dwi or --generate_fa_map is True")
@@ -150,10 +175,9 @@ class Inputs(object):
         """
         Prepare cerebral blood flow imaging inputs
         """
-        self.cbf_dir = os.path.join(self.input_dir, "cbf_files")
-        os.makedirs(self.cbf_dir, exist_ok=True)
-        
         if self.parameters["generate_cbf_map"]:
+            self.cbf_dir = os.path.join(self.input_dir, "cbf_files")
+            os.makedirs(self.cbf_dir, exist_ok=True)
             if not self.parameters["cbf_dir"]:
                 self.loggers.errors(f"Directory containing cerebral blood flow imaging files must be provided "
                                     f"with --cbf_dir if --generate_cbf_map is True")
@@ -209,8 +233,9 @@ class Inputs(object):
             
         # Cortical segmentation inputs
         if self.parameters["run_mesh_mapping"]:
+            if not self.parameters["run_surface_generation"]:
+                self.prepare_surface_inputs()
             self.prepare_mesh_inputs()
-            self.prepare_surface_inputs()
             self.prepare_dwi_inputs()
             self.prepare_cbf_inputs()
 
@@ -219,4 +244,6 @@ class Inputs(object):
             if not self.parameters["run_mesh_mapping"]:
                 self.prepare_labels_inputs()
                 self.prepare_mesh_inputs()
+            if not self.parameters["run_surface_generation"] and not self.parameters["run_mesh_mapping"]:
+                self.prepare_surface_inputs()
             self.prepare_bc_inputs()
