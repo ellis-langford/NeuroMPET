@@ -20,6 +20,11 @@ PARAMETERS = {
         "default": "",
         "help": "Path to freesurfer outputs directory (already processed inputs)"
     },
+    "segmentation_mode": {
+        "type": str,
+        "default": "SynthSeg",
+        "help": "Method of segmentation, options: FreeSurfer/SynthSeg (default: SynthSeg)"
+    },
     "regions": {
         "type": str,
         "default": "cerebrum_L,cerebrum_R,cerebrumWM_L,cerebrumWM_R," +
@@ -36,5 +41,10 @@ PARAMETERS = {
         "type": bool,
         "default": False,
         "help": "Aids processing if subject has a field of view > 256 (default: False)"
+    },
+    "use_gpu": {
+        "type": bool,
+        "default": False,
+        "help": "If True, GPU is used to run SynthSeg (default: False)"
     },
 }

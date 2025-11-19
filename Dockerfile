@@ -60,12 +60,19 @@ ENV ANTS_RANDOM_SEED=1
 
 # Download FreeSurfer
 RUN cd /usr/local \
-    && wget https://surfer.nmr.mgh.harvard.edu/pub/dist/freesurfer/7.4.1/freesurfer-linux-ubuntu22_amd64-7.4.1.tar.gz \
-    && tar -xzvf freesurfer-linux-ubuntu22_amd64-7.4.1.tar.gz \
-    && rm -rf freesurfer-linux-ubuntu22_amd64-7.4.1.tar.gz
+    && for i in 1 2 3 4 5; do \
+         wget --tries=10 --timeout=20 \
+           https://surfer.nmr.mgh.harvard.edu/pub/dist/freesurfer/8.1.0/freesurfer_ubuntu22-8.1.0_amd64.deb \
+           && break; \
+         echo "Download failed, retrying ($i/5)..."; \
+         sleep 5; \
+       done \
+    && apt-get update \
+    && apt-get install -y ./freesurfer_ubuntu22-8.1.0_amd64.deb \
+    && rm freesurfer_ubuntu22-8.1.0_amd64.deb
 
 # Initialise FreeSurfer and copy license
-ENV FREESURFER_HOME=/usr/local/freesurfer
+ENV FREESURFER_HOME=/usr/local/freesurfer/8.1.0
 RUN printf "\n# Freesurfer\nsource $FREESURFER_HOME/SetUpFreeSurfer.sh\n" >> /root/.bashrc
 COPY ./assets/fs_license.txt $FREESURFER_HOME/license.txt
 

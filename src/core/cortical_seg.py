@@ -1,11 +1,12 @@
 # Imports
 import os
 import sys
+import glob
+import shutil
 import subprocess
 import nibabel as nib
 import numpy as np
 import ants
-import shutil
 
 class FreeSurfer(object):
     """Class setup"""
@@ -26,16 +27,31 @@ class FreeSurfer(object):
         """
         # Define command
         self.subject_id = self.parameters["subject_id"]
+        self.use_gpu = 1 if self.parameters["use_gpu"] else 0
+
+        # FreeSurfer command
         self.freesurfer_source  = "source $FREESURFER_HOME/SetUpFreeSurfer.sh && "
-        self.freesurfer_command = f"recon-all -i {self.input_im} -subject {self.subject_id} " + \
-                                  f"-all -parallel -norandomness"
+        if self.parameters["segmentation_mode"].lower() == "freesurfer":
+            self.freesurfer_command = f"recon-all -i {self.input_im} -subject {self.subject_id} " + \
+                                      f"-all -parallel -norandomness"
 
-        # Add extra flags
-        for _input, tag in {"big_vents"          : "bigventricles",
-                            "large_FOV"          : "cw256"}.items():
-
-            if self.parameters[_input]:
-                self.freesurfer_command += f" -{tag}"
+            # Optional parameters
+            for _input, tag in {"big_vents" : "bigventricles",
+                                "large_FOV" : "cw256"}.items():
+                if self.parameters[_input]:
+                    self.freesurfer_command += f" -{tag}"
+                
+        # Synthseg command        
+        elif self.parameters["segmentation_mode"].lower() == "synthseg":
+            sub_outdir = os.path.join(self.tmp_dir, self.parameters['subject_id'])
+            os.makedirs(sub_outdir, exist_ok=True)
+            self.freesurfer_command = f"mri_synthseg --i {self.input_im} --o {sub_outdir}"
+            if not self.parameters["use_gpu"]:
+                self.freesurfer_command += f" --cpu"
+            
+        else:
+            self.loggers.errors(f"Segmentation mode (--segmentation_mode) must " + \
+                                f"be set to either FreeSurfer or SynthSeg")
 
     def run_freesurfer(self):
         """
@@ -63,15 +79,15 @@ class FreeSurfer(object):
             self.loggers.errors(f"Freesurfer execution returned non-zero exit status - " +
                                 f"please check log file at {self.freesurfer_log}")
 
+        # Combine left and right together
+        if self.parameters["segmentation_mode"].lower() == "synthseg":
+            segmentation = glob.glob(os.path.join(os.path.join(self.interim_dir, "fs_outputs"), "*synthseg.nii.gz"))[0]
+        else:        
+            segmentation = os.path.join(os.path.join(self.interim_dir, "fs_outputs"), "mri", "aseg.mgz")
         # Check required outputs have been produced
-        segmentation = os.path.join(os.path.join(self.interim_dir, "fs_outputs"), "mri", "aseg.mgz")
-        output_im    = os.path.join(os.path.join(self.interim_dir, "fs_outputs"), "mri", "T1.mgz")
         if not os.path.exists(segmentation):
             self.loggers.errors(f"Freesurfer has not produced a segmentation at {segmentation}" +
                                 f"- please check log file at {self.freesurfer_log}")
-        elif not os.path.exists(output_im):
-            self.loggers.errors(f"Freesurfer has not produced an output image at {output_im} - " +
-                                f"please check log file at {self.freesurfer_log}")
         else:
             self.loggers.plugin_log("Freesurfer run successfully")
 
@@ -128,26 +144,44 @@ class FreeSurfer(object):
         Binarise to extract required freesurfer labels
         """
         # Define image and log paths
-        subcortical_seg = os.path.join(self.fs_outputs, "mri", "aseg.nii.gz")
+        if self.parameters["segmentation_mode"].lower() == "synthseg":
+            subcortical_seg = glob.glob(os.path.join(self.fs_outputs, "*synthseg.nii.gz"))[0]
+        else:
+            subcortical_seg = os.path.join(self.fs_outputs, "mri", "aseg.nii.gz")
         bin_out  = os.path.join(self.interim_dir, f"{region}", f"{region}_bin.nii.gz")
         os.makedirs(os.path.join(self.interim_dir, region), exist_ok=True)
         binarise_log = os.path.join(self.log_dir, f"binarise.log")
 
-        labels = {"ventricles"     : "24 4 5 14 15 43 44 213",
-                  "cerebellum_L"   : "6 7 8",
-                  "cerebellum_R"   : "45 46 47",
-                  "cerebellumWM_L" : "7",
-                  "cerebellumWM_R" : "46",
-                  "brainstem"      : "16 170 171 172 173 174 175 177 178 179 71000 71010",
-                  "cerebrum_L"     : "2 3 10 11 12 13 17 18 19 20 26 28",
-                  "cerebrum_R"     : "41 42 49 50 51 52 53 54 55 56 58 60",
-                  "cerebrumWM_L"   : "2 78",
-                  "cerebrumWM_R"   : "41 79",
-                  "wholebrain"     : "6 7 8 16 45 46 47 192 "
-                                     "24 4 5 14 15 43 44 213 "
-                                     "2 3 10 11 12 13 17 18 19 20 26 28 "
-                                     "41 42 49 50 51 52 53 54 55 56 58 60"
-                 }
+        if self.parameters["segmentation_mode"].lower() == "freesurfer":
+            labels = {"ventricles"     : "24 4 5 14 15 43 44 213",
+                      "cerebellum_L"   : "6 7 8",
+                      "cerebellum_R"   : "45 46 47",
+                      "cerebellumWM_L" : "7",
+                      "cerebellumWM_R" : "46",
+                      "brainstem"      : "16 170 171 172 173 174 175 177 178 179 71000 71010",
+                      "cerebrum_L"     : "2 3 10 11 12 13 17 18 19 20 26 28",
+                      "cerebrum_R"     : "41 42 49 50 51 52 53 54 55 56 58 60",
+                      "cerebrumWM_L"   : "2 78",
+                      "cerebrumWM_R"   : "41 79",
+                      "wholebrain"     : "6 7 8 16 45 46 47 192 "
+                                         "24 4 5 14 15 43 44 213 "
+                                         "2 3 10 11 12 13 17 18 19 20 26 28 "
+                                         "41 42 49 50 51 52 53 54 55 56 58 60"
+                     }
+        else:
+            labels = {"ventricles"     : "4 5 14 15 43 44",
+                      "cerebellum_L"   : "7 8",
+                      "cerebellum_R"   : "46 47",
+                      "cerebellumWM_L" : "7",
+                      "cerebellumWM_R" : "46",
+                      "brainstem"      : "16",
+                      "cerebrum_L"     : "2 3 10 11 12 13 17 18 26 28",
+                      "cerebrum_R"     : "41 42 49 50 51 52 53 54 58 60",
+                      "cerebrumWM_L"   : "2",
+                      "cerebrumWM_R"   : "41",
+                      "wholebrain"     : "2 3 7 8 10 11 12 13 16 17 18 26 28 "
+                                         "41 42 46 47 49 50 51 52 53 54 58 60"
+                     }
 
         # Convert
         with open(binarise_log, "w") as outfile:
@@ -179,15 +213,14 @@ class FreeSurfer(object):
         atlas_labels = "/app/assets/mni_icbm152_CerebrA_atlas_labels.nii.gz"
         atlas_labels_out = os.path.join(self.interim_dir, "mni_icbm152_labels_subjectspace.nii.gz")
         brainstem_seg = os.path.join(self.interim_dir, "brainstem", "brainstem_bin.nii.gz")
-        input_image = self.input_im if self.input_im else os.path.join(self.fs_outputs, "mri", "T1.nii.gz")
         
         # Register atlas T1 to subject T1 space
-        registration = ants.registration(fixed=ants.image_read(input_image), 
+        registration = ants.registration(fixed=ants.image_read(self.input_im), 
                                          moving=ants.image_read(atlas_t1), 
                                          type_of_transform="Affine")
 
         # Apply transform to atlas labels
-        transformed_labels = ants.apply_transforms(fixed=ants.image_read(input_image),
+        transformed_labels = ants.apply_transforms(fixed=ants.image_read(self.input_im),
                                                    moving=ants.image_read(atlas_labels),
                                                    transformlist=[registration["fwdtransforms"][0]],
                                                    interpolator="nearestNeighbor")
@@ -289,9 +322,9 @@ class FreeSurfer(object):
             self.fs_outputs = os.path.join(self.input_dir, "fs_outputs")
 
         # Convert aseg file to NIfTI
-        self.loggers.plugin_log("Converting aseg and T1 file to NIfTI")
-        self.convert_T1()
-        self.convert_seg()
+        if self.parameters["segmentation_mode"].lower() == "freesurfer":
+            self.loggers.plugin_log("Converting aseg and T1 file to NIfTI")
+            self.convert_seg()
 
         # Create region binary files
         self.loggers.plugin_log("Creating region binary files")
