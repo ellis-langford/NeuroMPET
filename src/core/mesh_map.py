@@ -4,9 +4,11 @@ import sys
 import glob
 import nibabel as nib
 import numpy as np
+import meshio
 from scipy.spatial import KDTree
 from scipy.sparse import coo_matrix
 from src.core.mesh_loaders import MeshLoaders
+from collections import Counter, defaultdict
 
 class MeshMap(object):
     """Class setup"""
@@ -28,9 +30,9 @@ class MeshMap(object):
         Process meshes and surfaces into information txt files
         """
         # Extract global mesh information
-        global_mesh = glob.glob(os.path.join(self.mesh_dir, "global", "*global*.vtk"))[0]
+        self.global_mesh = glob.glob(os.path.join(self.mesh_dir, "global", "*global*.vtk"))[0]
         self.global_info_dir = os.path.join(self.interim_dir, "global_mesh_info")
-        self.mesh_loader.extract_mesh_info(global_mesh, self.global_info_dir, "global")
+        self.mesh_loader.extract_mesh_info(self.global_mesh, self.global_info_dir, "global")
 
         # Extract regional mesh information
         regions = ["cerebrum_L", "cerebrum_R", "cerebrumWM_L", "cerebrumWM_R",
@@ -60,7 +62,7 @@ class MeshMap(object):
         region_files = []
     
         # Define regions
-        regions = {
+        self.regions = {
             "cerebrum": [1, 2],
             "cerebrumWM": [3, 4],
             "brainstem": [5, 6],
@@ -72,7 +74,7 @@ class MeshMap(object):
         tree_global = KDTree(self.global_mesh_node_coords)
 
         # Loop over each region
-        for region in regions:
+        for region in self.regions:
             # Load region-specific coords and indices
             lh_node_coords   = self.mesh_loader.read_txt(os.path.join(self.regional_info_dir, f"{region}_L", f"{region}_L_node_coords.txt"), dtype=float)
             lh_tetra_indices = self.mesh_loader.read_txt(os.path.join(self.regional_info_dir, f"{region}_L", f"{region}_L_tetra_indices.txt"), dtype=int, index_file=True)
@@ -107,17 +109,17 @@ class MeshMap(object):
                 in_R = dist_R < tol_R
 
                 # Case 1: only in left
-                labels_chunk[in_L & ~in_R] = regions[region][0]
+                labels_chunk[in_L & ~in_R] = self.regions[region][0]
                 # Case 2: only in right
-                labels_chunk[in_R & ~in_L] = regions[region][1]
+                labels_chunk[in_R & ~in_L] = self.regions[region][1]
                 # Case 3: in both — pick whichever is closer
                 both = in_L & in_R
                 closer_to_L = dist_L[both] < dist_R[both]
                 closer_to_R = ~closer_to_L
 
                 both_idx = np.where(both)[0]
-                labels_chunk[both_idx[closer_to_L]] = regions[region][0]
-                labels_chunk[both_idx[closer_to_R]] = regions[region][1]
+                labels_chunk[both_idx[closer_to_L]] = self.regions[region][0]
+                labels_chunk[both_idx[closer_to_R]] = self.regions[region][1]
 
                 labels[start:end] = labels_chunk
         
@@ -133,7 +135,7 @@ class MeshMap(object):
         n_nodes = len(label_arrays[0])
         combined_labels = np.zeros(n_nodes, dtype=int)
         
-        for region, labels in zip(regions.keys(), label_arrays):
+        for region, labels in zip(self.regions.keys(), label_arrays):
             mask = labels != 0
             combined_labels[mask] = labels[mask]
 
@@ -151,7 +153,7 @@ class MeshMap(object):
         combined_labels[unlabeled_idx] = combined_labels[labeled_idx[nearest]]
 
         # Save combined labels
-        output_file = os.path.join(self.interim_dir, "regional_labels.txt")
+        output_file = os.path.join(self.interim_dir, "regional_node_labels.txt")
         self.mesh_loader.save_txt(output_file, combined_labels, add_index_col=False)
         self.labels_file = output_file
 
@@ -163,7 +165,7 @@ class MeshMap(object):
             f.write(f"Total global nodes: {n_nodes:,}\n")
             f.write(f"Unlabelled nodes:   {unlabelled:,} ({unlabelled / n_nodes:.2%})\n")
     
-        for region, (left_idx, right_idx) in regions.items():
+        for region, (left_idx, right_idx) in self.regions.items():
             n_left = np.sum(combined_labels == left_idx)
             n_right = np.sum(combined_labels == right_idx)
             total = n_left + n_right
@@ -174,7 +176,117 @@ class MeshMap(object):
         if not os.path.isfile(output_file):
             self.loggers.errors(f"Tetrahedra region label file not produced - {output_file}")
         else:
-            self.labels_file = os.path.join(self.interim_dir, "regional_labels.txt")
+            self.labels_file = os.path.join(self.interim_dir, "regional_node_labels.txt")
+
+    def node_to_cell_labels(self):
+        """
+        Convert node-based labels to cell-based labels using majority vote,
+        with neighbor-based tie-breaking, and log summary statistics.
+        """        
+        # Load mesh
+        mesh = meshio.read(self.global_mesh)
+        tets = mesh.cells_dict["tetra"]
+        n_cells = len(tets)
+    
+        # Load node labels
+        node_labels = np.loadtxt(self.labels_file, dtype=int)
+    
+        # Initial cell labels (majority vote)
+        cell_labels = np.zeros(n_cells, dtype=int)
+        tie_cells = []
+        for cid, tet in enumerate(tets):
+            labels = node_labels[tet]
+            labels_nonzero = labels[labels != 0]  # Ignore unlabelled nodes
+            if len(labels_nonzero) == 0:
+                cell_labels[cid] = 0
+                continue
+    
+            counts = Counter(labels_nonzero)
+            most_common_count = counts.most_common(1)[0][1]
+            # All labels tied for most frequent
+            tied_labels = [label for label, count in counts.items() if count == most_common_count]
+            if len(tied_labels) == 1:
+                cell_labels[cid] = tied_labels[0]
+            else:
+                # Neighbour-based assignment
+                tie_cells.append(cid)
+    
+        # Build node -> cell mapping for neighbour lookup
+        node_to_cells = defaultdict(list)
+        for cid, tet in enumerate(tets):
+            for n in tet:
+                node_to_cells[n].append(cid)
+    
+        # Neighbour-based tie-breaking
+        for cid in tie_cells:
+            tet = tets[cid]
+            neighbors = set()
+            for n in tet:
+                neighbors.update(node_to_cells[n])
+            neighbors.discard(cid)
+            neighbor_labels = [cell_labels[nid] for nid in neighbors if cell_labels[nid] != 0]
+            if neighbor_labels:
+                counts = Counter(neighbor_labels)
+                most_common_count = counts.most_common(1)[0][1]
+                tied = [label for label, count in counts.items() if count == most_common_count]
+                cell_labels[cid] = min(tied)  # If still no consensus, revert to smallest label
+            else:
+                cell_labels[cid] = 0
+    
+        # Save cell labels file
+        self.labels_file = os.path.join(self.interim_dir, "regional_cell_labels.txt")
+        os.makedirs(os.path.dirname(self.labels_file), exist_ok=True)
+        with open(self.labels_file, "w") as f:
+            for cid, label in enumerate(cell_labels, 1):  # 1-based indexing
+                f.write(f"{cid} {label}\n")
+    
+        # Logging
+        all_labels = np.unique(cell_labels)
+        unlabelled = np.sum(cell_labels == 0)
+        with open(os.path.join(self.log_dir, "labelled_cells_counts.txt"), "w") as f:
+            f.write(f"Total global cells: {n_cells:,}\n")
+            f.write(f"Unlabelled cells:   {unlabelled:,} ({unlabelled / n_cells:.2%})\n")
+
+            for region, (left_idx, right_idx) in self.regions.items():
+                n_left = np.sum(cell_labels == left_idx)
+                n_right = np.sum(cell_labels == right_idx)
+                total = n_left + n_right
+                f.write(f"{region:20s} L={n_left:,}  R={n_right:,}  Total={total:,}\n")
+
+    def create_mesh_with_labels(self):
+        """
+        Create a vtu file with attached ROI labels for visualisation
+        """       
+        # Load mesh
+        mesh = meshio.read(self.global_mesh)
+        cell_block = mesh.cells[0]
+        n_cells = cell_block.data.shape[0]
+        
+        # Load cell labels
+        raw = np.loadtxt(self.labels_file, dtype=int)
+        
+        # No index column
+        if raw.ndim == 1:
+            cell_labels = raw
+        # Index column
+        else:
+            raw = raw[np.argsort(raw[:, 0])]
+            cell_labels = raw[:, 1]
+        
+        # Attach ROI as cell-data
+        mesh.cell_data["ROI"] = [cell_labels]
+        
+        # Save to file
+        output_path = os.path.join(self.interim_dir, "global_with_labels.vtk")
+        
+        # Redirect stderr to suppress warnings
+        stderr_orig = sys.stderr
+        sys.stderr = open(os.devnull, "w")
+        try:
+            meshio.write(output_path, mesh, file_format="vtk", binary=False)
+        finally:
+            sys.stderr.close()
+            sys.stderr = stderr_orig
 
     def revise_labels_by_dwi(self):
         """
@@ -455,6 +567,9 @@ class MeshMap(object):
             # Classify tetrahedra into regions
             self.loggers.plugin_log("Classifying tetrahedra into regions")
             self.classify_tetrahedra()
+            self.loggers.plugin_log("Converting node labels to cell labels")
+            self.node_to_cell_labels()
+            self.create_mesh_with_labels()
     
             # Adjust labels based on FA
             if self.parameters["adjust_labels_dwi"]:

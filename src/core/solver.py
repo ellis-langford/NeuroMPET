@@ -58,11 +58,14 @@ class Solver(object):
                                 f"please check log file at {self.solver_log}")
 
         # Check required outputs have been produced
-        for timestep in range(0, self.timestep_count*self.timestep_interval+1, self.timestep_interval):
-            result_file = os.path.join(self.output_dir, f"{os.path.basename(self.mesh_file.split('.')[0])}_{timestep}.vtu")
+        for timestep in range(0, int(self.timestep_count * 50 / self.timestep_interval)):
+            result_file = os.path.join(self.output_dir, f"ouputs_{timestep}.vtu")
 
             if not os.path.exists(result_file):
-                self.loggers.errors(f"Solver has not produced an output file at timestep x" +
+                self.loggers.errors(f"Solver has not produced an output file at timestep {timestep} " +
+                                    f"- please check log file at {self.solver_log}")
+            elif not os.path.exists(os.path.join(self.output_dir, f"ouputs_region.vtu")):
+                self.loggers.errors(f"Solver has not produced a regional output file " +
                                     f"- please check log file at {self.solver_log}")
 
     def run_modelling(self):
@@ -89,14 +92,14 @@ class Solver(object):
             self.vent_surface = glob.glob(os.path.join(self.surface_dir, "**", "*ventricles*.stl"), recursive=True)[0]
 
             # Produce custom .bit file
+            self.loggers.plugin_log("Creating custom .bit file")
             self.bit_file = os.path.join(self.input_dir, "global.bit")
             self.mesh_loader.convert_and_export_custom_mesh(self.mesh_file,
                                                             self.wb_surface,
                                                             self.vent_surface,
                                                             self.bit_file)
-    
-            # Build solver command
-            self.build_solver_command()
-            
-            # Run Solver
-            self.run_solver()
+
+            # Run solver
+            self.loggers.plugin_log("Running MPET solver")
+            self.build_solver_command() # Build solver command
+            self.run_solver() # Run Solver
