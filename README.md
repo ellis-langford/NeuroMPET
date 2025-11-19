@@ -103,8 +103,10 @@ To install the necessary components for NeuroMPET, please follow the steps below
    > *--freesurfer_outputs*: a folder of FreeSurfer outputs<br>
 
 ► Other Parameters:<br>
+   > *--segmentation_mode*: method of segmentation, FreeSurfer/SynthSeg (default: SynthSeg)<br>
    > *--subject_id*: subjectID of data, used in logging only<br>
    > *--regions*: list of regions to process, defaults to 7 cortical regions<br>
+   > *--use_gpu*: run SynthSeg mode using GPU (default: False)<br>
    > *--big_vents*: add flag to FreeSurfer command to aid in processing of subjects with large ventricles (default: false)<br>
    > *--large_FOV*: add flag to FreeSurfer command to aid in processing of subjects with large FOV (default: false)<br>
 
@@ -204,7 +206,6 @@ Output directory
 ├── outputs
 │   ├── preprocessed_im.nii.gz
 │   ├── registered_im.nii.gz
-│   ├── fs_im.nii.gz
 │   ├── segmentations
 │   ├── surfaces
 │   ├── meshes
