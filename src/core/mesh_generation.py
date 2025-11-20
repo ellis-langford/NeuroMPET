@@ -6,16 +6,15 @@ import simpleware.scripting as sw
 from simpleware.scripting import SurfaceFixingControlParameters, Model
 
 # --------------- CONFIG & INPUTS ----------------
-BASE_DIR = r"D:\ellis\mnt\projects\neuro_mpet\workflow_processing"
+BASE_DIR = r"D:\ellis\mnt\projects\neuro_mpet"
 SURFACE_DIR = os.path.join(BASE_DIR, "3.surface_generation")
 OUTDIR = os.path.join(BASE_DIR, "4.meshing")
-# SUBJECTS = ["OAS30026_MR_d0129"]
-SUBJECTS = os.listdir(os.path.join(BASE_DIR, "data"))
+SUBJECTS = os.listdir(SURFACE_DIR)
 
-# Target and tolerances (configurable)
-TARGET_GLOBAL_ELEMENTS = 2_500_000            # Target for global mesh elements
-TOLERANCE_FRAC = 0.20                         # Element count relative tolerance (20%)
-COARSENESS_STEPS = 15                         # Number of mesh_coarseness values to try
+# Target and tolerances
+TARGET_GLOBAL_ELEMENTS = 2_500_000   # Target for global mesh elements
+TOLERANCE_FRAC = 0.20                # Element count relative tolerance (20%)
+COARSENESS_STEPS = 15                # Number of mesh_coarseness values to try
 
 REGIONS = {
     "global": -50,
@@ -181,7 +180,6 @@ def main():
 
         # Record start of meshing
         with open(os.path.join(subject_outdir, "results.txt"), "w") as rf:
-            rf.write(f"All meshes produced successfully {subject}\n")
             now = datetime.now().strftime('%d-%m-%Y %H:%M')
             rf.write(f"[ Log | {now} ] Starting meshing\n")
 

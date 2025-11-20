@@ -52,7 +52,15 @@ class Solver(object):
                                             self.solver_command],
                                             cwd=self.source_code_dir,
                                             stdout=outfile,
-                                            stderr=subprocess.STDOUT)
+                                            stderr=subprocess.STDOUT,
+                                            text=True,
+                                            bufsize=1)
+            for line in solver_sub.stdout:
+                timestamp = datetime.datetime.now().strftime("%d-%m-%& %H:%M")
+                outfile.write(f"[ Log | {timestamp} ] {line}")
+                outfile.flush()
+            solver_sub.wait()
+            
         if solver_sub.returncode != 0:
             self.loggers.errors(f"Solver execution returned non-zero exit status - " +
                                 f"please check log file at {self.solver_log}")
