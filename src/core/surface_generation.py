@@ -2,21 +2,21 @@
 import os
 import sys
 import glob
-import subprocess
-import nibabel as nib
 import numpy as np
-import ants
-import trimesh
-import shutil
-from skimage import measure
+import nibabel as nib
 import pyvista as pv
+from skimage import measure
+from scipy.ndimage import gaussian_filter, binary_dilation
+from scipy.spatial import KDTree
+from collections import deque
 
 class SurfaceGen(object):
     """Class setup"""
     def __init__(self, plugin_obj):
         # Check all expected attributed are present
-        to_inherit = ["loggers", "parameters", "base_dir", "input_dir",
-                      "interim_dir", "output_dir", "log_dir"]
+        to_inherit = ["loggers", "parameters", "base_dir", 
+                      "input_dir", "interim_dir", "output_dir",
+                      "log_dir", "segmentation_dir"]
         for attr in to_inherit:
             try:
                 setattr(self, attr, getattr(plugin_obj, attr))
@@ -24,218 +24,194 @@ class SurfaceGen(object):
                 print(f"Attribute Error - {e}")
                 sys.exit(1)
 
-    def generate_surface_pv(self, region):
+    def segmentation_to_surface(self, segmentation, affine, smooth_sigma=0.7):
         """
-        Generate surfaces using skimage and pyvista
+        Converts binary segmentation to PyVista surface.
         """
-        # Global composite
-        if region == "global":
-            # Define paths
-            wb_bin = glob.glob(os.path.join(self.segmentation_dir, f"*wholebrain*.nii.gz"))[0]
-            vent_bin = glob.glob(os.path.join(self.segmentation_dir, f"*ventricles*.nii.gz"))[0]
-
-            # Get data
-            vent_data = nib.load(vent_bin).get_fdata()
-            wb_data = nib.load(wb_bin).get_fdata()
-
-            # Subtract vents from wholebrain
-            data = np.where(vent_data > 0, 0, wb_data)
-            affine = nib.load(wb_bin).affine
-
-        # Other regions
-        else:
-            bin_data = glob.glob(os.path.join(self.segmentation_dir, f"*{region}*.nii.gz"))[0]
-            data = nib.load(bin_data).get_fdata()
-            affine = nib.load(bin_data).affine
-        
+        data = gaussian_filter(segmentation.astype(float), sigma=smooth_sigma)
+        data = (data - data.min()) / (data.max() - data.min())
         verts, faces, _, _ = measure.marching_cubes(data, level=0.5)
         verts_hom = np.hstack([verts, np.ones((verts.shape[0], 1))])
         verts_world = (affine @ verts_hom.T).T[:, :3]
         faces_pv = np.hstack([np.full((faces.shape[0], 1), 3), faces]).astype(np.int32)
         
-        # Create PyVista mesh
-        mesh = pv.PolyData(verts_world, faces_pv)
-        mesh = mesh.connectivity(extraction_mode='largest') # Remove disconnected pieces
-        mesh = mesh.smooth(n_iter=50, relaxation_factor=0.01) # Laplacian smoothing
-        mesh = mesh.clean()  # Remove duplicate, unused and degenerate points
+        surface = pv.PolyData(verts_world, faces_pv)
+        surface = surface.connectivity(extraction_mode='largest') # Remove disconnected pieces
+        surface = surface.clean()  # Remove duplicates and degenerate faces
+        
+        return surface
 
-        outpath = os.path.join(self.output_dir, "surfaces", f"{region}.stl")
-        os.makedirs(os.path.join(self.output_dir, "surfaces"), exist_ok=True)
-        mesh.save(outpath)
+    def generate_global_surface(self):
+        """
+        Generate global surface:
+        - Remove overseg of ventricles that lies outside wholebrain
+        - Fill holes in wholebrain mask to ensure watertightness
+        - Seperate overlaps between wholebrain and ventricles by selectively dilating
+        - Generate wholebrain and ventricles stl surfaces
+        - Generate global stl surface by combining wholebrain and ventricles
+        """
+        # Load wholebrain
+        try:
+            wb_bin = glob.glob(os.path.join(self.segmentation_dir, f"*wholebrain*.nii.gz"), recursive=True)[0]
+        except:
+            self.loggers.errors(f"A wholebrain segmentations must be provided if --generate_global is True")
+        wb_data = nib.load(wb_bin).get_fdata().astype(bool)
+        wb_affine = nib.load(wb_bin).affine
 
+        # Load ventricles
+        try:
+            vent_bin = glob.glob(os.path.join(self.segmentation_dir, f"*ventricles*.nii.gz"), recursive=True)[0]
+        except:
+            self.loggers.errors(f"A ventricles segmentations must be provided if --generate_global is True")
+        vent_data = nib.load(vent_bin).get_fdata().astype(bool)
+        vent_affine = nib.load(vent_bin).affine
+        
+        ### Remove ventricular overseg ###
+        vent_data = vent_data & wb_data
+        
+        ### Fill holes in wholebrain ###
+        visited = np.zeros_like(wb_data, dtype=bool) # Create a mask of visited voxels
+        q = deque() # Initialise queue with the 8 corners of the volume
+        shape = wb_data.shape
+        corners = [(0,0,0), (0,0,shape[2]-1), (0,shape[1]-1,0), (0,shape[1]-1,shape[2]-1),
+                   (shape[0]-1,0,0), (shape[0]-1,0,shape[2]-1), (shape[0]-1,shape[1]-1,0), (shape[0]-1,shape[1]-1,shape[2]-1)]
+        for c in corners:
+            if not wb_data[c]:
+                q.append(c)
+                visited[c] = True
+        
+        # 6-connectivity flood-fill
+        neighbors = [(1,0,0), (-1,0,0), (0,1,0), (0,-1,0), (0,0,1), (0,0,-1)]
+        while q:
+            x, y, z = q.popleft()
+            for dx, dy, dz in neighbors:
+                nx, ny, nz = x+dx, y+dy, z+dz
+                if 0 <= nx < shape[0] and 0 <= ny < shape[1] and 0 <= nz < shape[2]:
+                    if not wb_data[nx,ny,nz] and not visited[nx,ny,nz]:
+                        visited[nx,ny,nz] = True
+                        q.append((nx,ny,nz))
+        
+        # All voxels not reachable from outside are interior holes
+        interior_holes = (~visited) & (~wb_data)
+        wb_data[interior_holes] = True # Fill them
+
+        ### Separate touching surfaces ###
+        radius=2
+        max_iter = 5
+        g = np.ogrid[-radius:radius+1, -radius:radius+1, -radius:radius+1] # Spherical structuring element
+        struct = (g[0]**2 + g[1]**2 + g[2]**2) <= radius**2
+
+        # Try several times to seperate
+        for i in range(max_iter):
+            # Detect touching voxels
+            touching = vent_data & wb_data
+            if not np.any(touching):
+                break
+            # Dilate the touching region
+            localised_growth = binary_dilation(touching, structure=struct)
+            wb_data |= localised_growth # Grow wholebrain mask locally
+        
+        ### Generate surfaces ###
+        wb_surf = self.segmentation_to_surface(wb_data, wb_affine)
+        vent_surf = self.segmentation_to_surface(vent_data, vent_affine)
+        
+        ### Check for overlaps and fix at surface level ###
+        tolerance = 0.1
+        max_iter = 5
+        tree = KDTree(wb_surf.points)
+        dists, idx = tree.query(vent_surf.points)
+        
+        if np.any(dists < tolerance):    
+            # Ensure normals exist
+            if wb_surf.point_normals is None:
+                wb_surf.compute_normals(cell_normals=False, point_normals=True, inplace=True)
+    
+            iteration = 0
+            while iteration < max_iter:
+                # Find closest cortical points to ventricle points
+                vent_points = vent_surf.points
+                tree = KDTree(wb_surf.points)
+                distances, idx = tree.query(vent_points)
+                distances = np.array(distances)
+                idx = np.array(idx)
+                
+                # Identify points that are too close
+                touching_mask = distances < tolerance
+                if not np.any(touching_mask):
+                    # No overlaps left
+                    break
+                
+                # Compute minimal displacement
+                displacement = (tolerance - distances[touching_mask])[:, np.newaxis]
+                normals = wb_surf.point_normals[idx[touching_mask]]
+                wb_surf.points[idx[touching_mask]] += normals * displacement
+                
+                iteration += 1
+            
+            # Check again for overlaps
+            tree = KDTree(wb_surf.points)
+            distances, _ = tree.query(vent_surf.points)
+            if np.any(distances < 0.1):
+                self.loggers.errors(f"Global surface generation failed - overlaps present")
+
+        # Check watertight
+        if not wb_surf.is_all_triangles:
+            wb_surf.triangulate(inplace=True)
+        if not wb_surf.is_manifold:
+            self.loggers.errors(f"Wholebrain surface generation failed - not watertight")
+        if not vent_surf.is_all_triangles:
+            vent_surf.triangulate(inplace=True)
+        if not vent_surf.is_manifold:
+            self.loggers.errors(f"Ventricle surface generation failed - not watertight")
+
+        # Save wholebrain and vent surfaces
+        wb_surf.save(os.path.join(self.output_dir, "surfaces", f"wholebrain.stl"))
+        vent_surf.save(os.path.join(self.output_dir, "surfaces", f"ventricles.stl"))
+
+        # Save to .stl file
+        global_surf = wb_surf.merge(vent_surf, merge_points=False)
+        outpath = os.path.join(self.output_dir, "surfaces", f"global.stl")
+        global_surf.save(outpath)
+        
         if not os.path.exists(outpath):
-            self.loggers.errors(f"Surface generation failed for {region}")
+            self.loggers.errors(f"Global surface generation failed")
 
-    def tessellate(self, region):
+    def generate_region_surface(self, region):
         """
-        Tessellate to create surface from input volume
+        Generate regional surface files
         """
-        # Define image and log paths
-        bin_data = glob.glob(os.path.join(self.segmentation_dir, f"*{region}*.nii.gz"))[0]
-        surf_out = os.path.join(self.interim_dir, f"{region}", "surf")
-        tessellate_log = os.path.join(self.log_dir, f"tessellate_{region}.log")
+        # Global composite
+        if region not in ["global", "wholebrain", "ventricles"]:            
+            # Load data
+            bin_data = glob.glob(os.path.join(self.segmentation_dir, f"*{region}*.nii.gz"))[0]
+            data = nib.load(bin_data).get_fdata()
+            affine = nib.load(bin_data).affine
 
-        # Convert
-        with open(tessellate_log, "w") as outfile:
-            subprocess.run(["bash", "-c",
-                            self.freesurfer_source + "mri_tessellate " +
-                            f"{bin_data} 1 {surf_out}"],
-                            stdout=outfile,
-                            stderr=subprocess.STDOUT,
-                            env=self.freesurfer_env)
-            
-        # Check if conversion successful
-        if not os.path.exists(surf_out):
-            self.loggers.errors(f"Tessellation of {region} failed - " +
-                                f"please check log file at {tessellate_log}")
-
-    def smooth(self, region):
-        """
-        Smooths the tessellation of region surface
-        """
-        # Define image and log paths
-        surfs = os.path.join(self.interim_dir, f"{region}", "surf")
-        smooth_out = os.path.join(self.interim_dir, f"{region}", "smooth")
-        smooth_log = os.path.join(self.log_dir, f"smooth_{region}.log")
-
-        # Convert
-        with open(smooth_log, "w") as outfile:
-            subprocess.run(["bash", "-c",
-                            self.freesurfer_source + "mris_smooth " +
-                            f"{surfs} {smooth_out}"],
-                            stdout=outfile,
-                            stderr=subprocess.STDOUT,
-                            env=self.freesurfer_env)
-            
-        # Check if conversion successful
-        if not os.path.exists(smooth_out):
-            self.loggers.errors(f"Smoothing of {region} failed - " +
-                                f"please check log file at {smooth_log}")
-            
-    def convert_to_stl(self, region):
-        """
-        Converts geometry file to .stl
-        """
-        input_im = os.path.join(self.interim_dir, f"{region}", "smooth")
-
-        # Define output and log paths
-        geo_out = os.path.join(self.interim_dir, f"{region}", f"{region}.stl")
-        conversion_log = os.path.join(self.log_dir, f"{region}_conversion.log")
-
-        # Convert
-        with open(conversion_log, "w") as outfile:
-            subprocess.run(["bash", "-c",
-                            self.freesurfer_source + "mris_convert " +
-                            f"{input_im} {geo_out}"],
-                            stdout=outfile,
-                            stderr=subprocess.STDOUT,
-                            env=self.freesurfer_env)
-            
-        # Check if conversion successful
-        if not os.path.exists(geo_out):
-            self.loggers.errors(f"Conversion {region} to .stl failed - " +
-                                f"please check log file at {conversion_log}")
-
-    def clean_stl(self, region):
-        """
-        Fix issues in stl file (e.g. non-normal orientations)
-        """
-        input_im = os.path.join(self.interim_dir, f"{region}", f"{region}.stl")
-
-        # Define output and log paths
-        geo_out = os.path.join(self.output_dir, "surfaces", f"{region}.stl")
-        os.makedirs(os.path.join(self.output_dir, "surfaces"), exist_ok=True)
-
-        # Clean
-        mesh = trimesh.load(input_im) # Load mesh
-        components = mesh.split(only_watertight=False) # Split into connected components
-        largest = max(components, key=lambda c: c.area) # Keep largest shell
-        
-        # Remove small disconnected patches
-        cleaned_components = [
-            c for c in components if c.area > 0.05 * largest.area
-        ]
-        
-        mesh_clean = trimesh.util.concatenate(cleaned_components)
-        
-        # Fill holes
-        if not mesh_clean.is_watertight:
-            mesh_clean.fill_holes()
-        
-        # Export cleaned STL
-        mesh_clean.export(geo_out)
-            
-        # Check if conversion successful
-        if not os.path.exists(geo_out):
-            self.loggers.errors(f"Cleaning of {region} .stl failed")
-
-    def generate_surface_fs(self, region):
-        """
-        Binarises, tessellates, smooths, converts and cleans volume to .stl using FreeSurfer
-        """
-        if region == "global":
-            # Load global binary and ventricle mask
-            wholebrain_seg = nib.load(glob.glob(os.path.join(self.segmentation_dir, "*wholebrain*.nii.gz"))[0])
-            vent_seg = nib.load(glob.glob(os.path.join(self.segmentation_dir, "*ventricles*.nii.gz"))[0])
-            wholebrain_data = wholebrain_seg.get_fdata()
-            vent_data = vent_seg.get_fdata()
-        
-            # Subtract ventricles (make sure masks are binary)
-            result_data = np.where((wholebrain_data > 0) & (vent_data == 0), 1, 0)
-        
-            # Step 4: Save result
-            result_img = nib.Nifti1Image(result_data.astype(np.uint8), affine=wholebrain_seg.affine)
-            result_out_fpath = os.path.join(self.segmentation_dir, "global_bin.nii.gz")
-            nib.save(result_img, result_out_fpath)
-        
-        # Outputdir
-        os.makedirs(os.path.join(self.interim_dir, f"{region}"), exist_ok=True)
-        
-        # Process geometry
-        self.tessellate(region)
-        self.smooth(region)
-        self.convert_to_stl(region)
-        self.clean_stl(region)
-
-        # Define expected outputs
-        surf_out = os.path.join(self.interim_dir, f"{region}", "surf")
-        smooth_out = os.path.join(self.interim_dir, f"{region}", "smooth")
-        conv_out = os.path.join(self.interim_dir, f"{region}", f"{region}.stl")
-        geo_out = os.path.join(self.output_dir, "surfaces", f"{region}.stl")
-            
-        # Check if geometry generation successful
-        outputs = [surf_out, smooth_out, conv_out, geo_out]
-        for output in outputs:
-            if not os.path.exists(output):
-                self.loggers.errors(f"Geometry generation failed - " +
-                                    f"required output missing ({output})")
+            surface = self.segmentation_to_surface(data, affine, smooth_sigma=0.7)
+    
+            outpath = os.path.join(self.output_dir, "surfaces", f"{region}.stl")
+            surface.save(outpath)
+    
+            if not os.path.exists(outpath):
+                self.loggers.errors(f"Surface generation failed for {region}")
 
     def run_surface_gen(self):
         """
         Run surface .stl generation
         """
-        # Error check
-        self.regions = self.parameters["regions"].split(",")
-        if "wholebrain" not in self.regions or "ventricles" not in self.regions:
-            self.loggers.errors(f"Wholebrain and ventricles segmentations must be"
-                                f" provided if --generate_global is True")
-            
-        # Directories
-        if self.parameters["segmentation_dir"] or self.parameters["segmentations"]:
-            self.segmentation_dir = os.path.join(self.input_dir, "segmentations")
-        else:
-            self.segmentation_dir = os.path.join(self.output_dir, "segmentations")
-            
+        # Directories            
         self.interim_dir = os.path.join(self.interim_dir, "surface_generation")
         os.makedirs(self.interim_dir, exist_ok=True)
+        os.makedirs(os.path.join(self.output_dir, "surfaces"), exist_ok=True)
         
-        # Create other ROI geometries
-        self.loggers.plugin_log(f"Creating region surface files")
-        for region in self.regions:
-            if self.parameters["fs_surfaces"]:
-                self.generate_surface_fs(region)
-            else:
-                self.generate_surface_pv(region)
+        
+        # Generate global surface
         if self.parameters["generate_global"]:
             self.loggers.plugin_log(f"Creating global surface file")
-            self.generate_surface_pv("global")
+            self.generate_global_surface()
+
+        # Create ROI geometries
+        self.loggers.plugin_log(f"Creating region surface files")
+        self.regions = self.parameters["regions"].split(",")
+        for region in self.regions:
+            self.generate_region_surface(region)
