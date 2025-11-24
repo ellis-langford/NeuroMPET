@@ -318,9 +318,30 @@ class MeshLoaders(object):
     
         dist_outer, _ = tree_outer.query(face_centroids)
         dist_inner, _ = tree_inner.query(face_centroids)
-    
-        inner_mask = dist_inner < dist_outer
+
+        # -------------------------------
+        # Distance-based tie-breaking to prefer inner surface
+        # -------------------------------
+        # difference: positive means closer to inner surface
+        dist_diff = dist_outer - dist_inner
+        
+        # threshold in mm for "similar enough"
+        threshold_mm = 0.5     # YOU CAN TUNE: 0.3–0.6 mm works well
+        
+        # Apply rule:
+        # if distances are nearly equal (within threshold), force inner assignment
+        prefer_inner = np.abs(dist_diff) < threshold_mm
+        
+        # initial classification
+        initial_inner = dist_inner < dist_outer
+        
+        # refined classification
+        inner_mask = initial_inner | prefer_inner
         outer_mask = ~inner_mask
+
+    
+        # inner_mask = dist_inner < dist_outer
+        # outer_mask = ~inner_mask
     
         inner_faces = surface_faces[inner_mask]
         outer_faces = surface_faces[outer_mask]
@@ -356,3 +377,65 @@ class MeshLoaders(object):
                 n2 = int(l[3]) + 1
                 n3 = int(l[4]) + 1
                 f.write(f"4 {n0} {n1} {n2} {n3}\n")
+
+    def extract_surfaces_from_bit(self, bit_file, outdir):
+        """
+        Extract inner and outer surface from .bit for visualisation
+        """
+        nodes = []
+        inner_faces = []
+        outer_faces = []
+    
+        with open(bit_file, "r") as f:
+            lines = f.readlines()
+    
+        i = 0
+        while i < len(lines):
+            line = lines[i].strip()
+    
+            # Load nodes
+            if line == "$Node":
+                count = int(lines[i+1])
+                for j in range(count):
+                    parts = lines[i+2+j].split()
+                    # expected: ID x y z
+                    nodes.append([float(parts[1]), float(parts[2]), float(parts[3])])
+                i += 2 + count
+                continue
+    
+            # Outer surface triangles
+            if line == "$OuterFaceCell":
+                count = int(lines[i+1])
+                for j in range(count):
+                    parts = lines[i+2+j].split()
+                    # Format: 3 o n1 n2 n3
+                    n1, n2, n3 = map(int, parts[2:5])
+                    outer_faces.append([n1-1, n2-1, n3-1])  # to 0-based index
+                i += 2 + count
+                continue
+    
+            # Inner surface triangles
+            if line == "$InnerFaceCell":
+                count = int(lines[i+1])
+                for j in range(count):
+                    parts = lines[i+2+j].split()
+                    # Format: 3 i n1 n2 n3
+                    n1, n2, n3 = map(int, parts[2:5])
+                    inner_faces.append([n1-1, n2-1, n3-1])
+                i += 2 + count
+                continue
+    
+            i += 1
+    
+        points = np.array(nodes)
+        inner_tri = np.array(inner_faces)
+        outer_tri = np.array(outer_faces)
+    
+        # Write files
+        cells = [("triangle", inner_tri)]
+        mesh = meshio.Mesh(points=points, cells=cells)
+        meshio.write(os.path.join(outdir, "inner_surface.vtu"), mesh)
+    
+        cells = [("triangle", outer_tri)]
+        mesh = meshio.Mesh(points=points, cells=cells)
+        meshio.write(os.path.join(outdir, "outer_surface.vtu"), mesh)
