@@ -5,15 +5,11 @@ PARAMETERS = {
         "default": "",
         "help": "Path to optional properties file containing additional parameters"
     },
-    "mesh_dir": {
+    "meshes": {
         "type": str,
         "default": "",
-        "help": "Path to directory containing mesh .vtk files"
-    },
-    "surface_dir": {
-        "type": str,
-        "default": "",
-        "help": "Path to directory containing surface .stl files"
+        "help": "Path to directory containing all mesh files or" +
+                "list of comma seperated paths to mesh files"
     },
     "dwi_dir": {
         "type": str,
@@ -29,11 +25,6 @@ PARAMETERS = {
         "type": bool,
         "default": False,
         "help": "If True, ROI labels are updated based on DWI FA (default: False)"
-    },
-    "adjust_outer_labels": {
-        "type": bool,
-        "default": False,
-        "help": "If True, outer surface labels are adjusted based on surface triangles (default: False)"
     },
     "generate_cbf_map": {
         "type": bool,

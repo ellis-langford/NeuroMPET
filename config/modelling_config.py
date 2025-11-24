@@ -5,22 +5,24 @@ PARAMETERS = {
         "default": "",
         "help": "Path to optional properties file containing additional parameters"
     },
-    "mesh_dir": {
+    "meshes": {
         "type": str,
         "default": "",
-        "help": "Path to directory containing mesh .vtk files"
+        "help": "Path to directory containing all mesh files or" +
+                "list of comma seperated paths to mesh files"
     },
-    "surface_dir": {
+    "surfaces": {
         "type": str,
         "default": "",
-        "help": "Path to directory containing surface .stl files"
+        "help": "Path to directory containing all surface files or" +
+                "list of comma seperated paths to surface files"
     },
-    "bc_fpath": {
+    "bc_file": {
         "type": str,
         "default": "",
         "help": "Path to boundary conditions (.csv) file"
     },
-    "labels_fpath": {
+    "labels_file": {
         "type": str,
         "default": "",
         "help": "Path to ROI label file (required if --run_meshing is False)"

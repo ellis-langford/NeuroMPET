@@ -25,13 +25,6 @@ PARAMETERS = {
         "default": "SynthSeg",
         "help": "Method of segmentation, options: FreeSurfer/SynthSeg (default: SynthSeg)"
     },
-    "regions": {
-        "type": str,
-        "default": "cerebrum_L,cerebrum_R,cerebrumWM_L,cerebrumWM_R," +
-                   "cerebellum_L,cerebellum_R,cerebellumWM_L,cerebellumWM_R," +
-                   "brainstem_L,brainstem_R,ventricles,wholebrain",
-        "help": "Comma seperated list of regions to process"
-    },
     "big_vents": {
         "type": bool,
         "default": False,
