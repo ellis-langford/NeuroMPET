@@ -14,8 +14,9 @@ class MeshMap(object):
     """Class setup"""
     def __init__(self, plugin_obj):
         # Check all expected attributed are present
-        to_inherit = ["loggers", "parameters", "base_dir", "input_dir", "mesh_dir", 
-                      "surface_dir", "interim_dir", "output_dir", "log_dir"]
+        to_inherit = ["loggers", "parameters", "base_dir",
+                      "input_dir", "mesh_dir", 
+                      "interim_dir", "output_dir", "log_dir"]
         for attr in to_inherit:
             try:
                 setattr(self, attr, getattr(plugin_obj, attr))
@@ -28,26 +29,23 @@ class MeshMap(object):
     def prepare_mesh_info_inputs(self):
         """
         Process meshes and surfaces into information txt files
+        - Load global mesh information
+        - Load reigonal mesh information
+        - Load surface information
         """
         # Extract global mesh information
-        self.global_mesh = glob.glob(os.path.join(self.mesh_dir, "global", "*global*.vtk"))[0]
+        self.global_mesh = glob.glob(os.path.join(self.mesh_dir, "**", "*global*.vtk"), recursive=True)[0]
         self.global_info_dir = os.path.join(self.interim_dir, "global_mesh_info")
         self.mesh_loader.extract_mesh_info(self.global_mesh, self.global_info_dir, "global")
 
         # Extract regional mesh information
-        regions = ["cerebrum_L", "cerebrum_R", "cerebrumWM_L", "cerebrumWM_R",
-                   "cerebellum_L", "cerebellum_R", "cerebellumWM_L", "cerebellumWM_R",
-                   "brainstem_L", "brainstem_R"]
+        regions = self.parameters["regions"].split(",")
         for region in regions:
-            region_mesh = glob.glob(os.path.join(self.mesh_dir, region, f"*{region}*.vtk"))[0]
+            if region in ["ventricles", "wholebrain", "global"]:
+                continue
+            region_mesh = glob.glob(os.path.join(self.mesh_dir, "**", f"*{region}*.vtk"), recursive=True)[0]
             self.regional_info_dir = os.path.join(self.interim_dir, "regional_mesh_info")
             self.mesh_loader.extract_mesh_info(region_mesh, self.regional_info_dir, region)
-
-        # Extract outer surface stl information
-        if self.parameters["surface_dir"]:
-            outer_surface = glob.glob(os.path.join(self.surface_dir, "**", "*wholebrain*.stl"), recursive=True)[0]
-            self.surface_info_dir = os.path.join(self.interim_dir, "surface_info")            
-            self.mesh_loader.extract_mesh_info(outer_surface, self.surface_info_dir, "outer_surface", cell_type="triangle")
 
         # Load global files
         self.global_mesh_node_coords = self.mesh_loader.read_txt(os.path.join(self.global_info_dir, "global_node_coords.txt"), dtype=float) # Node coords
@@ -57,6 +55,11 @@ class MeshMap(object):
     def classify_tetrahedra(self):
         """
         Classify which region each tetrahedral element belongs to
+        - Create global KDTree
+        - Create reigon KDTrees
+        - Match each node to closest region
+        - Match any unlabelled nodes to closest labelled node
+        - Log node labelling information
         """
         label_arrays = []
         region_files = []
@@ -139,18 +142,18 @@ class MeshMap(object):
             mask = labels != 0
             combined_labels[mask] = labels[mask]
 
-        # Identify labeled and unlabeled nodes
-        unlabeled_idx = np.where(combined_labels == 0)[0]
-        labeled_idx = np.where(combined_labels != 0)[0]
+        # Identify labelled and unlabelled nodes
+        unlabelled_idx = np.where(combined_labels == 0)[0]
+        labelled_idx = np.where(combined_labels != 0)[0]
     
-        # Build KD-tree on labeled nodes
-        tree = KDTree(self.global_mesh_node_coords[labeled_idx])
+        # Build KD-tree on labelled nodes
+        tree = KDTree(self.global_mesh_node_coords[labelled_idx])
     
-        # Find nearest labeled node for each unlabeled one
-        _, nearest = tree.query(self.global_mesh_node_coords[unlabeled_idx], k=1)
+        # Find nearest labelled node for each unlabelled one
+        _, nearest = tree.query(self.global_mesh_node_coords[unlabelled_idx], k=1)
     
         # Assign the same label
-        combined_labels[unlabeled_idx] = combined_labels[labeled_idx[nearest]]
+        combined_labels[unlabelled_idx] = combined_labels[labelled_idx[nearest]]
 
         # Save combined labels
         output_file = os.path.join(self.interim_dir, "regional_node_labels.txt")
@@ -180,8 +183,11 @@ class MeshMap(object):
 
     def node_to_cell_labels(self):
         """
-        Convert node-based labels to cell-based labels using majority vote,
-        with neighbor-based tie-breaking, and log summary statistics.
+        Convert node-based labels to cell-based labels
+        - Load mesh and node labels
+        - Assign cell label by majority vote
+        - If tie, assign by neighbor-based tie-breaking
+        - Log summary statistics
         """        
         # Load mesh
         mesh = meshio.read(self.global_mesh)
@@ -401,84 +407,6 @@ class MeshMap(object):
             if not os.path.isfile(fpath):
                 self.loggers.errors(f"File not produced - {fpath}")
 
-    def revise_outer_tetra_labels(self):
-        """
-        Revise tetrahedral labels for tetrahedra that are part of the outer surface
-        """
-        # Load surface files
-        self.out_surface_nodes = self.mesh_loader.read_txt(os.path.join(self.surface_info_dir, "outer_surface_node_coords.txt"), dtype=float)
-        self.out_surface_faces = self.mesh_loader.read_txt(os.path.join(self.surface_info_dir, "outer_surface_face_indices.txt"), dtype=int, index_file=True)
-        
-        # Build KDTree for nearest neighbour matching
-        tree = KDTree(self.global_mesh_node_coords)
-        dists, matched = tree.query(self.out_surface_nodes)
-
-        # Check node matching against tolerances
-        max_tol = 1e-3
-        if np.any(dists > max_tol):
-            self.loggers.plugin_log(f"WARNING: Some outer surface nodes mapped > {max_tol}. Max dist = {dists.max():.4e}")
-
-        # Remap face indices to global indices
-        remapped = matched[self.out_surface_faces]
-
-        # Save output file
-        output_file = os.path.join(self.interim_dir, f"outer_surface_face_indices_mapped.txt")
-        self.mesh_loader.save_txt(output_file, remapped, index_file=True, add_index_col=False)
-
-        # Check file produced
-        if not os.path.isfile(output_file):
-            self.loggers.errors(f"Mapping surface face file not produced - {output_file}")
-            
-        # Load outer surface face indices and current labels
-        outer_faces = self.mesh_loader.read_txt(os.path.join(self.interim_dir, "outer_surface_face_indices_mapped.txt"), dtype=int, index_file=True)
-        labels = self.mesh_loader.read_txt(self.labels_file, dtype=int, remove_idx_col=False)
-    
-        # Sort vertices in each tetrahedron for consistent comparison
-        tetra_sorted = np.sort(self.global_mesh_tetra_indices, axis=1)
-        outer_sorted = np.sort(outer_faces, axis=1)
-    
-        # Add tetrahedron index as extra column for tracking
-        tetra_sorted = np.hstack([tetra_sorted, np.arange(tetra_sorted.shape[0])[:, None]])
-    
-        # Sort rows lexicographically for fast intersection
-        tetra_sorted = tetra_sorted[np.lexsort(tetra_sorted[:, ::-1].T)]
-        outer_sorted = outer_sorted[np.lexsort(outer_sorted[:, ::-1].T)]
-    
-        # Helper: find intersecting rows by vertex combinations
-        def intersect_rows(a, b):
-            a = np.ascontiguousarray(a)
-            b = np.ascontiguousarray(b)
-            dtype = {"names": [f"f{i}" for i in range(a.shape[1])], "formats": a.shape[1]*[a.dtype]}
-            return np.intersect1d(a.view(dtype), b.view(dtype), return_indices=True)[1]
-    
-        # Check all combinations of vertices
-        rows_to_update = np.concatenate([
-            intersect_rows(tetra_sorted[:, 0:3], outer_sorted), # First 3 vertices
-            intersect_rows(tetra_sorted[:, 1:4], outer_sorted), # Last 3 vertices
-            intersect_rows(tetra_sorted[:, [0,1,3]], outer_sorted), # Vertices 0,1,3
-            intersect_rows(tetra_sorted[:, [0,2,3]], outer_sorted) # Vertices 0,2,3
-        ])
-    
-        # Map back to original tetrahedron indices that need label updates
-        tetra_indices = tetra_sorted[rows_to_update, 4].astype(int)
-    
-        # Update labels for outer face tetrahedra
-        # 3&4 -> 1&2: cerebrum WM to cerebrum GM
-        # 9&10 -> 7&8: cerebellum WM to cerebellum GM
-        for old_label, new_label in zip([3, 4, 9, 10], [1, 2, 7, 8]):
-            mask = labels[tetra_indices, 1] == old_label
-            labels[tetra_indices[mask], 1] = new_label
-    
-        # Save revised labels
-        output_file = os.path.join(self.interim_dir, "labels_outer_revised.txt")
-        self.mesh_loader.save_txt(output_file, labels, add_index_col=False)
-
-        # Check output file produced
-        if not os.path.isfile(output_file):
-            self.loggers.errors(f"Revised outer label file not produced - {output_file}")
-        else:
-            self.labels_file = output_file
-
     def map_scalar_to_tetra(self, nii_fpath, scalar_type):
         """
         Map a scalar field (e.g., CBF, FA) from a NIfTI volume onto the tetrahedral mesh
@@ -554,45 +482,36 @@ class MeshMap(object):
 
         self.dwi_dir = os.path.join(self.input_dir, "dwi_files")
         self.cbf_dir = os.path.join(self.input_dir, "cbf_files")
-        
-        regions = ["global", "ventricles", "brainstem_L", "brainstem_R",
-                   "cerebrum_L", "cerebrum_R", "cerebrumWM_L", "cerebrumWM_R", 
-                   "cerebellum_L", "cerebellum_R", "cerebellumWM_L", "cerebellumWM_R"]
 
-        if self.parameters["run_mesh_mapping"]:
-            # Create information files from meshes
-            self.loggers.plugin_log("Preparing mesh information inputs")
-            self.prepare_mesh_info_inputs()
-    
-            # Classify tetrahedra into regions
-            self.loggers.plugin_log("Classifying tetrahedra into regions")
-            self.classify_tetrahedra()
-            self.loggers.plugin_log("Converting node labels to cell labels")
-            self.node_to_cell_labels()
-            self.create_mesh_with_labels()
-    
-            # Adjust labels based on FA
-            if self.parameters["adjust_labels_dwi"]:
-                self.loggers.plugin_log("Revising labels according to DWI FA values")
-                self.revise_labels_by_dwi()
-    
-            # Revise outer tetrahedra labels
-            if self.parameters["adjust_outer_labels"]:
-                self.loggers.plugin_log("Adjusting outer tetrahedra labels")
-                self.revise_outer_tetra_labels()
-    
-            # Produce CBF scalar map
-            if self.parameters["generate_cbf_map"]:
-                self.loggers.plugin_log("Generating CBF scalar map")
-                cbf_file = glob.glob(os.path.join(self.cbf_dir, "*cbf*.nii*"))[0]
-                self.map_scalar_to_tetra(cbf_file, "CBF")
-    
-            # Produce FA scalar map
-            if self.parameters["generate_fa_map"]:
-                self.loggers.plugin_log("Generating FA scalar map")
-                fa_file = glob.glob(os.path.join(self.dwi_dir, "*FA*.nii*"))[0]
-                self.map_scalar_to_tetra(fa_file, "FA")
-    
-            # Save final label file with index col
-            labels = self.mesh_loader.read_txt(self.labels_file, dtype=int, remove_idx_col=False)
-            self.mesh_loader.save_txt(os.path.join(self.output_dir, "labels.txt"), labels, add_index_col=True)
+        # Create information files from meshes
+        self.loggers.plugin_log("Preparing mesh information inputs")
+        self.prepare_mesh_info_inputs()
+
+        # Classify tetrahedra into regions
+        self.loggers.plugin_log("Classifying tetrahedra into regions")
+        self.classify_tetrahedra()
+        self.loggers.plugin_log("Converting node labels to cell labels")
+        self.node_to_cell_labels()
+        self.create_mesh_with_labels()
+
+        # Adjust labels based on FA
+        # This function is currently untested
+        if self.parameters["adjust_labels_dwi"]:
+            self.loggers.plugin_log("Revising labels according to DWI FA values")
+            self.revise_labels_by_dwi()
+
+        # Produce CBF scalar map
+        if self.parameters["generate_cbf_map"]:
+            self.loggers.plugin_log("Generating CBF scalar map")
+            cbf_file = glob.glob(os.path.join(self.cbf_dir, "*cbf*.nii*"))[0]
+            self.map_scalar_to_tetra(cbf_file, "CBF")
+
+        # Produce FA scalar map
+        if self.parameters["generate_fa_map"]:
+            self.loggers.plugin_log("Generating FA scalar map")
+            fa_file = glob.glob(os.path.join(self.dwi_dir, "*FA*.nii*"))[0]
+            self.map_scalar_to_tetra(fa_file, "FA")
+
+        # Save final label file with index col
+        labels = self.mesh_loader.read_txt(self.labels_file, dtype=int, remove_idx_col=False)
+        self.mesh_loader.save_txt(os.path.join(self.output_dir, "labels.txt"), labels, add_index_col=False)
