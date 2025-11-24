@@ -14,20 +14,20 @@ SUBJECTS = os.listdir(SURFACE_DIR)
 # Target and tolerances
 TARGET_GLOBAL_ELEMENTS = 2_500_000   # Target for global mesh elements
 TOLERANCE_FRAC = 0.20                # Element count relative tolerance (20%)
-COARSENESS_STEPS = 15                # Number of mesh_coarseness values to try
+COARSENESS_STEPS = 10                # Number of mesh_coarseness values to try
 
 REGIONS = {
-    "global": -50,
-    "brainstem_L": -50,
-    "brainstem_R": -50,
-    "cerebrum_L": -50,
-    "cerebrum_R": -50,
-    "cerebrumWM_L": -50,
-    "cerebrumWM_R": -50,
-    "cerebellum_L": -50,
-    "cerebellum_R": -50,
-    "cerebellumWM_L": -50,
-    "cerebellumWM_R": -50
+    "global": 10,
+    "brainstem_L": 10,
+    "brainstem_R": 10,
+    "cerebrum_L": -10,
+    "cerebrum_R": -10,
+    "cerebrumWM_L": -10,
+    "cerebrumWM_R": -10,
+    "cerebellum_L": 15,
+    "cerebellum_R": 15,
+    "cerebellumWM_L": -30,
+    "cerebellumWM_R": -30
 }
 
 # ------------------ FUNCTIONS -------------------
@@ -47,7 +47,7 @@ def get_parameters(surface_path, volume_fpath=""):
     else:
         return bbox_volume, num_triangles
 
-def fix_surface(subject, region, start_coarse, surface_path, outdir, rerun=False):
+def fix_surface(subject, region, surface_path, outdir, rerun=False):
     """
     Try to import surface, fix it (1 or 2 rounds), create FE model, generate mesh, export vtk.
     Returns: True if surface successfully fixed.
@@ -86,7 +86,7 @@ def fix_surface(subject, region, start_coarse, surface_path, outdir, rerun=False
     model.AddSurface(surface)
     doc.EnableModelsMode()
     model.SetExportType(Model.VtkVolume)
-    model.SetCompoundCoarsenessOnPart(model.GetPartByName(region), start_coarse)
+    model.SetCompoundCoarsenessOnPart(model.GetPartByName(region), -50)
 
     # Attempt to generate mesh
     try:
@@ -98,9 +98,26 @@ def fix_surface(subject, region, start_coarse, surface_path, outdir, rerun=False
         doc.RemoveModel(model)
         doc.RemoveSurface(surface)
     except Exception as e:
-        success = False
-        doc.RemoveSurface(surface)
-        return success
+        try:
+            # Try meshing with a different coarseness value
+            model.SetCompoundCoarsenessOnPart(model.GetPartByName(region), -40)
+            doc.GenerateMesh()
+            outpath = os.path.join(outdir, f"{region}.vtk")
+            doc.ExportVtkVolume(outpath, False)
+            success = True
+            surface.Export(os.path.join(outdir, f"{region}.stl"), False)
+            doc.RemoveModel(model)
+            doc.RemoveSurface(surface)
+        except Exception as e:
+            success = False
+            try:
+                doc.RemoveModel(model)
+            except:
+                pass
+            try:
+                doc.RemoveSurface(surface)
+            except:
+                return success
     
     return success
 
@@ -179,21 +196,23 @@ def main():
         os.makedirs(subject_outdir, exist_ok=True)
 
         # Record start of meshing
-        with open(os.path.join(subject_outdir, "results.txt"), "w") as rf:
-            now = datetime.now().strftime('%d-%m-%Y %H:%M')
-            rf.write(f"[ Log | {now} ] Starting meshing\n")
+        if not os.path.isfile(os.path.join(subject_outdir, "results.txt")):
+            with open(os.path.join(subject_outdir, "results.txt"), "w") as rf:
+                now = datetime.now().strftime('%d-%m-%Y %H:%M')
+                rf.write(f"[ Log | {now} ] Starting meshing\n")
 
         # -------- FIX WHOLEBRAIN & VENTRICLE SURFACES --------
         for region in ["wholebrain", "ventricles"]:
             surface_path = os.path.join(SURFACE_DIR,  subject, "outputs", "surfaces", f"{region}.stl")
             outdir_region = os.path.join(subject_outdir, region)
-            surface_fixed = fix_surface(subject, region, -50, surface_path, outdir_region, rerun=False)
-            if surface_fixed == False:
-                surface_fixed = fix_surface(subject, region, -50, surface_path, outdir_region, rerun=True)
+            if not os.path.isfile(os.path.join(outdir_region, f"{region}.stl")):
+                surface_fixed = fix_surface(subject, region, surface_path, outdir_region, rerun=False)
                 if surface_fixed == False:
-                    with open(os.path.join(outdir_region, "errors.txt"), "a") as f:
-                        now = datetime.now().strftime('%d-%m-%Y %H:%M')
-                        f.write(f"[ Error | {now} ] Surface fixing for {region} failed after two attempts {subject}\n")
+                    surface_fixed = fix_surface(subject, region, surface_path, outdir_region, rerun=True)
+                    if surface_fixed == False:
+                        with open(os.path.join(outdir_region, "errors.txt"), "a") as f:
+                            now = datetime.now().strftime('%d-%m-%Y %H:%M')
+                            f.write(f"[ Error | {now} ] Surface fixing for {region} failed after two attempts {subject}\n")
         
         # -------------------- GLOBAL MESH --------------------
         surface_path = os.path.join(SURFACE_DIR,  subject, "outputs", "surfaces", "global.stl")
@@ -233,13 +252,19 @@ def main():
 
         # Global mesh does not exist
         else:
-            surface_fixed = fix_surface(subject, "global", start_coarse, surface_path, outdir_global, rerun=False)
-            if surface_fixed == False:
-                surface_fixed = fix_surface(subject, "global", start_coarse, surface_path, outdir_global, rerun=True)
+            fixed_surface = os.path.join(outdir_global, "global.stl")
+            if not os.path.isfile(fixed_surface):
+                surface_fixed = fix_surface(subject, "global", surface_path, outdir_global, rerun=False)
                 if surface_fixed == False:
-                    with open(os.path.join(subject_outdir, "errors.txt"), "a") as f:
-                        now = datetime.now().strftime('%d-%m-%Y %H:%M')
-                        f.write(f"[ Error | {now} ] Global surface fixing failed after two attempts {subject}\n")
+                    surface_fixed = fix_surface(subject, "global", surface_path, outdir_global, rerun=True)
+                    if surface_fixed == False:
+                        with open(os.path.join(subject_outdir, "errors.txt"), "a") as f:
+                            now = datetime.now().strftime('%d-%m-%Y %H:%M')
+                            f.write(f"[ Error | {now} ] Global surface fixing failed after two attempts {subject}\n")
+            
+            # Skip to next subject if global surface cannot be fixed            
+            if not os.path.isfile(fixed_surface):
+                continue
 
             # Try multiple coarseness values
             surface_path = os.path.join(outdir_global, "global.stl")
@@ -343,13 +368,17 @@ def main():
 
             # Regional mesh does not exist
             else:
-                surface_fixed = fix_surface(subject, region, start_coarse, surface_path, outdir_region, rerun=False)
-                if surface_fixed == False:
-                    surface_fixed = fix_surface(subject, region, start_coarse, surface_path, outdir_region, rerun=True)
+                fixed_surface = os.path.join(outdir_region, f"{region}.stl")
+                if not os.path.isfile(fixed_surface):
+                    surface_fixed = fix_surface(subject, region, surface_path, outdir_region, rerun=False)
                     if surface_fixed == False:
-                        with open(os.path.join(outdir_region, "errors.txt"), "a") as f:
-                            now = datetime.now().strftime('%d-%m-%Y %H:%M')
-                            f.write(f"[ Error | {now} ] Surface fixing failed after two attempts {subject} {region}\n")
+                        surface_fixed = fix_surface(subject, region, surface_path, outdir_region, rerun=True)
+                        if surface_fixed == False:
+                            with open(os.path.join(outdir_region, "errors.txt"), "a") as f:
+                                now = datetime.now().strftime('%d-%m-%Y %H:%M')
+                                f.write(f"[ Error | {now} ] Surface fixing failed after two attempts {subject} {region}\n")
+                            # Surface fixing unsuccessful, skipping to next region
+                            continue
 
                 surface_path = os.path.join(outdir_region, f"{region}.stl")
 
@@ -410,7 +439,7 @@ def main():
                         with open(os.path.join(subject_outdir, "errors.txt"), "a") as f:
                             now = datetime.now().strftime('%d-%m-%Y %H:%M')
                             f.write(f"[ Error | {now} ] Region meshing failed for subject {subject} {region}\n")
-                        break
+                        continue
 
         # -------------------- FINAL SUBJECT CHECK --------------------
         subject_success = True
