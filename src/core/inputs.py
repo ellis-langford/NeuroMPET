@@ -19,199 +19,227 @@ class Inputs(object):
                 print(f"Attribute Error - {e}")
                 sys.exit(1)
 
+    def check_input_dir(self, input_flag):
+        """
+        Helper function which checks and cleans directory inputs
+        """
+        # Check if required input has been provided
+        if not self.parameters[input_flag]:
+            self.loggers.errors(f"Required input --{input_flag} has not been provided")
+        else:
+            filepath = self.parameters[input_flag]
+
+        # Check comma seperated list of files
+        if "," in self.parameters[input_flag]:
+            # Check individual paths
+            paths = self.parameters[input_flag].split(",")
+            for path in paths:
+                if not os.path.isfile(path):
+                    self.loggers.errors(f"Input path provided with --{input_flag} does not exist: {path}")
+            # Inputs all ok
+            is_dir = False
+            return is_dir, paths
+                    
+        # Check directory
+        else:
+            # Check if input is valid
+            if not os.path.isdir(filepath):
+                    self.loggers.errors(f"Input path provided with --{input_flag} does not exist: {filepath}")
+            # Check if directory is empty
+            elif len(os.listdir(filepath)) == 0:
+                self.loggers.errors(f"Input path provided with --{input_flag} points to an empty directory")
+            # Inputs all ok
+            else:
+                is_dir = True
+                return is_dir, filepath
+
+    def check_input_file(self, input_flag, ext):
+        """
+        Helper function which checks and cleans file inputs
+        """
+        # Check if required input has been provided
+        if not self.parameters[input_flag]:
+            self.loggers.errors(f"Required input --{input_flag} has not been provided")
+        else:
+            filepath = self.parameters[input_flag]
+
+        # Check if filepath is valid
+        if not os.path.isfile(filepath):
+            self.loggers.errors(f"Input path provided with --{input_flag} does not exist: {filepath}")
+        # Check if filepath is the correct extension
+        elif not filepath.endswith(ext):
+            self.loggers.errors(f"Input path provided with --{input_flag} has the wrong extension: "
+                                f"expected {ext}, actual {filepath}")
+        else:
+            return filepath
+            
     def prepare_input_image(self):
         """
         Copy input image and atlas to working directory
         """
-        # No input_im provided
+        # Prepare freesurfer-based inputs
         if not self.parameters["input_im"]:
-            if self.parameters["run_preprocessing"] or self.parameters["run_registration"]:
-                self.loggers.errors(f"An input image must be provided with --input_im")
-            else:
-                if not self.parameters["freesurfer_outputs"]:
-                    self.loggers.errors(f"Either an input image or FreeSurfer output directory "
-                                        f"must be provided with --input_im/freesurfer_outputs")
-                else:
-                    # FreeSurfer outputs provided instead
-                    if not os.path.isdir(self.parameters["freesurfer_outputs"]):
-                        self.loggers.errors(f"FreeSurfer outputs directory --freesurfer_outputs "
-                                            f"does not exist {self.parameters['freesurfer_outputs']}")
-                    else:
-                        self.fs_outputs = os.path.join(self.input_dir, "fs_outputs")
-                        shutil.copytree(self.parameters["freesurfer_outputs"], self.fs_outputs)
-        else:
-            # Not a valid directory
-            if not os.path.isfile(self.parameters["input_im"]):
-                self.loggers.errors(f"Input image provided with --input_im does "
-                                    f"not exist {self.parameters['input_im']}")
-            else:
-                # Copy to working directory
-                shutil.copy(self.parameters["input_im"], os.path.join(self.input_dir, "image.nii.gz"))
-
-        # Atlas image checking
-        if not os.path.isfile(self.parameters["input_atlas"]):
-            self.loggers.errors(f"Input atlas provided with --input_atlas does "
-                                f"not exist {self.parameters['input_atlas']}")
-        else:
-            shutil.copy(self.parameters["input_atlas"], os.path.join(self.input_dir, "atlas.nii.gz"))
+            _, input_im = self.check_input_dir("freesurfer_outputs")
+            shutil.copytree(input_im, self.fs_outputs)
             
+         # Prepare input image
+        else:
+            input_im = self.check_input_file("input_im", ext=".nii.gz")
+            self.input_im = os.path.join(self.input_dir, "image.nii.gz")
+            shutil.copy(input_im, self.input_im)
+
+        # Prepare atlas input
+        if self.parameters["input_atlas"]:
+            input_im = self.check_input_file("input_atlas", ext=".nii.gz")
+            atlas_path = os.path.join(self.input_dir, "atlas.nii.gz")
+            shutil.copy(input_im, atlas_path)   
             
     def prepare_seg_inputs(self):
         """
         Copy segmentation inputs to working directory
         """
-        self.segmentation_dir = os.path.join(self.input_dir, "segmentations")
-        os.makedirs(self.segmentation_dir)
-        
-        # No segmentation_dir provided and segmentations not due to run
+        # Inputs provided
         if not self.parameters["run_cortical_segmentation"]:
-            if not self.parameters["segmentation_dir"] and not self.parameters["segmentations"]:
-                self.loggers.errors(f"A segmentation directory --segmentation_dir or comma seperated list of segmentation "
-                                    f"files --segmentations must be provded if --run_cortical_segmentation is false")
+            # Destination directory
+            self.segmentation_dir = os.path.join(self.input_dir, "segmentations")
+
+            # Check input
+            is_dir, segmentation_dir = self.check_input_dir("segmentations")
+
+            # Directory of segmentations
+            if is_dir:
+                shutil.copytree(segmentation_dir, self.segmentation_dir)
+            # List of comma seperated segmentation paths
             else:
-                if self.parameters["segmentation_dir"]:
-                    # Not a valid directory
-                    if not os.path.isdir(self.parameters["segmentation_dir"]):
-                        self.loggers.errors(f"Segmentation input directory --segmentation_dir does not exist {self.parameters['segmentation_dir']}")
-                    else:
-                        # Copy to working directory
-                        shutil.copytree(self.parameters["segmentation_dir"], self.segmentation_dir)
-                elif self.parameters["segmentations"]:
-                    segmentations = self.parameters["segmentations"].split(",")
-                    for seg in segmentations:
-                        if not os.path.isfile(seg):
-                            self.loggers.errors(f"Segmentation path provided does not exist {seg}")
-                        else:
-                            # Copy to working directory
-                            shutil.copy(seg, os.path.join(self.segmentation_dir, os.path.basename(seg)))
-                
+                os.makedirs(self.segmentation_dir)
+                for path in segmentation_dir:
+                    shutil.copy(path, self.segmentation_dir)
+
+        # Inputs from prior processing step
+        else:
+            self.segmentation_dir = os.path.join(self.output_dir, "segmentations")
+
+    def prepare_surface_inputs(self, fixed_surfaces=False):
+        """
+        Copy surface inputs to working directory
+        """
+        # Inputs provided
+        if not self.parameters["run_surface_generation"]:
+            # Destination directory
+            self.surface_dir = os.path.join(self.input_dir, "surfaces")
+
+            # Check input
+            is_dir, surface_dir = self.check_input_dir("surfaces")
+
+            # Directory of surfaces
+            if is_dir:
+                shutil.copytree(surface_dir, self.surface_dir)
+            # List of comma seperated surface paths
+            else:
+                os.makedirs(self.surface_dir)
+                for path in surface_dir:
+                    shutil.copy(path, self.surface_dir)
+
+        # Inputs from prior processing step
+        else:
+            # Fixed surface inputs from meshing stage
+            if fixed_surfaces:
+                self.surface_dir = os.path.join(self.output_dir, "meshes")
+            # Before fix surface inputs from surface generation stage
+            else:
+                self.surface_dir = os.path.join(self.output_dir, "surfaces")
+
     def prepare_mesh_inputs(self):
         """
         Copy mesh inputs to working directory
         """
-        self.mesh_dir = os.path.join(self.input_dir, "meshes")
-        
-        # No mesh_dir provided
-        if not self.parameters["mesh_dir"]:
-            self.loggers.errors(f"Global and regional mesh .vtk files must be provided with --mesh_dir")
+        # Inputs provided
+        if not self.parameters["run_mesh_generation"]:
+            # Destination directory
+            self.mesh_dir = os.path.join(self.input_dir, "meshes")
+
+            # Check input
+            is_dir, mesh_dir = self.check_input_dir("meshes")
+
+            # Directory of meshes
+            if is_dir:
+                shutil.copytree(mesh_dir, self.mesh_dir)
+            # List of comma seperated mesh paths
+            else:
+                os.makedirs(self.mesh_dir)
+                for path in mesh_dir:
+                    shutil.copy(path, self.mesh_dir)
+
+        # Inputs from prior processing step
         else:
-            # Not a valid directory
-            if not os.path.isdir(self.parameters["mesh_dir"]):
-                self.loggers.errors(f"Mesh input directory --mesh_dir does not exist {self.parameters['mesh_dir']}")
-            else:
-                # Copy to working directory
-                if self.parameters["run_mesh_mapping"]:
-                    shutil.copytree(self.parameters["mesh_dir"], self.mesh_dir)
-                else:
-                    shutil.copytree(self.parameters["mesh_dir"], os.path.join(self.mesh_dir, "global"))
-
-    def prepare_surface_inputs(self):
-        """
-        Copy surface inputs to working directory
-        """
-        self.surface_dir = os.path.join(self.input_dir, "surfaces")
-        os.makedirs(self.surface_dir)
-        
-        # No surface_dir provided
-        if self.parameters["run_modelling"]:
-            if not self.parameters["surface_dir"]:
-                # No global.bit provided
-                if not os.path.isfile(os.path.join(self.input_dir, "meshes", "global.bit")):
-                    self.loggers.errors(f"If no global.bit file provided in --mesh_dir. A wholebrain.stl "
-                                        f"and ventricles.stl must be provided with --surface_dir")
-            # Check that wholebrain and ventricle surface provided
-            try:
-                wb_surface = glob.glob(os.path.join(self.parameters["surface_dir"], "**", "*wholebrain*.stl"), recursive=True)[0]
-                vent_surface = glob.glob(os.path.join(self.parameters["surface_dir"], "**", "*ventricles*.stl"), recursive=True)[0]
-            except:
-                self.loggers.errors(f"A wholebrain.stl and ventricles.stl must be provided with --surface_dir"
-                                    f" if --run_modelling is true and no global.bit provided")
-                
-            # Copy to working directory
-            shutil.copy(wb_surface, os.path.join(self.surface_dir, "wholebrain.stl"))
-            shutil.copy(vent_surface, os.path.join(self.surface_dir, "ventricles.stl"))
-
-        # No surface_dir provided
-        elif self.parameters["adjust_outer_labels"]:
-            if not self.parameters["surface_dir"]:
-                self.loggers.errors(f"A wholebrain surface must be provided with "
-                                    f"--surface_dir if --adjust_outer_labels is true")
-            # No wholebrain surface provided
-            # Check that wholebrain surface provided
-            try:
-                wb_surface = glob.glob(os.path.join(self.parameters["surface_dir"], "**", "*wholebrain*.stl"), recursive=True)[0]
-            except:
-                self.loggers.errors(f"A wholebrain surface must be provided with "
-                                    f"--surface_dir if --adjust_outer_labels is true")
-            # Copy to working directory
-            else:
-                shutil.copytree(wb_surface, os.path.join(self.surface_dir, "wholebrain.stl"))
-        
+            self.mesh_dir = os.path.join(self.output_dir, "meshes")
+   
     def prepare_dwi_inputs(self):
         """
         Prepare diffusion weighted imaging inputs
         """
-        if self.parameters["adjust_labels_dwi"] or self.parameters["generate_fa_map"]:
-            self.dwi_dir = os.path.join(self.input_dir, "dwi_files")
-            os.makedirs(self.dwi_dir, exist_ok=True)
-            
-            if not self.parameters["dwi_dir"]:
-                self.loggers.errors(f"Directory containing diffusion weighted imaging files must be provided "
-                                    f"with --dwi_dir if --adjust_labels_dwi or --generate_fa_map is True")
-            else:
-                if not os.path.isdir(self.parameters["dwi_dir"]):
-                    self.loggers.errors(f"DWI input directory --dwi_dir does not exist {self.parameters['dwi_dir']}")
-                else:
-                    # Copy to working directory
-                    dwi_dir = self.parameters["dwi_dir"]
-                    shutil.copy(glob.glob(os.path.join(dwi_dir, "*tensor*.nii*"))[0], os.path.join(self.dwi_dir, f"dwi_tensor.nii.gz"))
-                    shutil.copy(glob.glob(os.path.join(dwi_dir, "*L1*.nii.gz"))[0], os.path.join(self.dwi_dir, f"dwi_L1.nii.gz"))
-                    shutil.copy(glob.glob(os.path.join(dwi_dir, "*L2*.nii.gz"))[0], os.path.join(self.dwi_dir, f"dwi_L2.nii.gz"))
-                    shutil.copy(glob.glob(os.path.join(dwi_dir, "*L3*.nii.gz"))[0], os.path.join(self.dwi_dir, f"dwi_L3.nii.gz"))
-                    shutil.copy(glob.glob(os.path.join(dwi_dir, "*FA*.nii.gz"))[0], os.path.join(self.dwi_dir, f"dwi_FA.nii.gz"))
-                    shutil.copy(glob.glob(os.path.join(dwi_dir, "*MD*.nii.gz"))[0], os.path.join(self.dwi_dir, f"dwi_MD.nii.gz"))
-                
+        # Destination directory
+        self.dwi_dir = os.path.join(self.input_dir, "dwi_files")
+        os.makedirs(self.dwi_dir, exist_ok=True)
+
+        # Check input
+        _, dwi_dir = self.check_input_dir("dwi_dir")
+
+        # Copy to working directory
+        try:
+            shutil.copy(glob.glob(os.path.join(dwi_dir, "*tensor*.nii*"))[0], os.path.join(self.dwi_dir, f"dwi_tensor.nii.gz"))
+            shutil.copy(glob.glob(os.path.join(dwi_dir, "*L1*.nii.gz"))[0], os.path.join(self.dwi_dir, f"dwi_L1.nii.gz"))
+            shutil.copy(glob.glob(os.path.join(dwi_dir, "*L2*.nii.gz"))[0], os.path.join(self.dwi_dir, f"dwi_L2.nii.gz"))
+            shutil.copy(glob.glob(os.path.join(dwi_dir, "*L3*.nii.gz"))[0], os.path.join(self.dwi_dir, f"dwi_L3.nii.gz"))
+            shutil.copy(glob.glob(os.path.join(dwi_dir, "*FA*.nii.gz"))[0], os.path.join(self.dwi_dir, f"dwi_FA.nii.gz"))
+            shutil.copy(glob.glob(os.path.join(dwi_dir, "*MD*.nii.gz"))[0], os.path.join(self.dwi_dir, f"dwi_MD.nii.gz"))
+        except Exception as e:
+            self.loggers.errors(f"Problem copying dwi_dir input {e}")
+
     def prepare_cbf_inputs(self):
         """
         Prepare cerebral blood flow imaging inputs
         """
-        if self.parameters["generate_cbf_map"]:
-            self.cbf_dir = os.path.join(self.input_dir, "cbf_files")
-            os.makedirs(self.cbf_dir, exist_ok=True)
-            if not self.parameters["cbf_dir"]:
-                self.loggers.errors(f"Directory containing cerebral blood flow imaging files must be provided "
-                                    f"with --cbf_dir if --generate_cbf_map is True")
-            else:
-                if not os.path.isdir(self.parameters["cbf_dir"]):
-                    self.loggers.errors(f"CBF input directory --cbf_dir does not exist {self.parameters['cbf_dir']}")
-                else:
-                    # Copy to working directory
-                    cbf_dir = self.parameters["cbf_dir"]
-                    shutil.copy(glob.glob(os.path.join(cbf_dir, "*.nii.gz"))[0], os.path.join(self.cbf_dir, f"cbf_map.nii.gz"))
+        # Destination directory
+        self.cbf_dir = os.path.join(self.input_dir, "cbf_files")
+        os.makedirs(self.cbf_dir, exist_ok=True)
+
+        # Check input
+        _, cbf_dir = self.check_input_dir("cbf_dir")
+
+        # Copy to working directory
+        try:
+            shutil.copy(glob.glob(os.path.join(cbf_dir, "*.nii.gz"))[0], os.path.join(self.cbf_dir, f"cbf_map.nii.gz"))
+        except Exception as e:
+            self.loggers.errors(f"Problem copying cbf_dir input {e}")
 
     def prepare_labels_inputs(self):
         """
         Prepare ROI label .txt file input
         """
-        if not self.parameters["labels_fpath"]:
-            self.loggers.errors("If --run_mesh_mapping set to False, ROI label .txt file must be provided with --labels_fpath")
-        elif not os.path.isfile(self.parameters["labels_fpath"]):
-            self.loggers.errors(f"No valid ROI label .txt file found at {self.parameters['labels_fpath']}")
-        else: 
-            shutil.copy(self.parameters["labels_fpath"], os.path.join(self.input_dir, "labels.txt"))
-                
+        # Inputs provided
+        if not self.parameters["run_mesh_mapping"]:
+             # Prepare input image
+            labels_file = self.check_input_file("labels_file", ext=".txt")
+            self.labels_file = os.path.join(self.input_dir, "labels.txt")
+            shutil.copy(labels_file, self.labels_file)
+        # Inputs from prior processing step
+        else:
+            self.labels_file = os.path.join(self.output_dir, "labels.txt")
+
     def prepare_bc_inputs(self):
         """
-        Prepare boundary condition file input
+        Prepare ROI label .txt file input
         """
-        if self.parameters["bc_fpath"]:
-            if not os.path.isfile(self.parameters["bc_fpath"]):
-                self.loggers.errors(f"No valid boundary condition .csv file found at {self.parameters['bc_fpath']}")
-            else:
-                self.boundary_conditions = os.path.join(self.input_dir, f"boundary_conditions.csv")
-                shutil.copy(self.parameters["bc_fpath"], self.boundary_conditions)
+        # Inputs provided
+        if self.parameters["bc_file"]:
+            # Prepare input image
+            bc_file = self.check_input_file("bc_file", ext=".csv")
+            self.bc_file = os.path.join(self.input_dir, "boundary_conditions.csv")
+            shutil.copy(bc_file, self.bc_file)
+        # Standard inputs
         else:
-            self.boundary_conditions = "/app/assets/boundary_conditions.csv"
+            self.bc_file = "/app/assets/boundary_conditions.csv"
 
     def prepare_inputs(self):
         """
@@ -227,23 +255,30 @@ class Inputs(object):
         ]):
             self.prepare_input_image()
 
+
         # Global surface generation
         if self.parameters["run_surface_generation"]:
             self.prepare_seg_inputs()
+
+        # Mesh generation
+        # if self.parameters["run_mesh_generation"]:
+        #     self.prepare_surface_inputs()
             
-        # Cortical segmentation inputs
+        # Mesh mapping
         if self.parameters["run_mesh_mapping"]:
-            if not self.parameters["run_surface_generation"]:
-                self.prepare_surface_inputs()
+            # Mesh inputs
             self.prepare_mesh_inputs()
-            self.prepare_dwi_inputs()
-            self.prepare_cbf_inputs()
+            # DWI inputs
+            if self.parameters["adjust_labels_dwi"] or self.parameters["generate_fa_map"]:
+                self.prepare_dwi_inputs()
+            # CBF inputs
+            if self.parameters["generate_cbf_map"]:
+                self.prepare_cbf_inputs()
 
         # Modelling inputs
         if self.parameters["run_modelling"]:
             if not self.parameters["run_mesh_mapping"]:
-                self.prepare_labels_inputs()
                 self.prepare_mesh_inputs()
-            if not self.parameters["run_surface_generation"] and not self.parameters["run_mesh_mapping"]:
-                self.prepare_surface_inputs()
+            self.prepare_surface_inputs(fixed_surfaces=True)
+            self.prepare_labels_inputs()
             self.prepare_bc_inputs()
