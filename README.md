@@ -105,7 +105,6 @@ To install the necessary components for NeuroMPET, please follow the steps below
 ► Other Parameters:<br>
    > *--segmentation_mode*: method of segmentation, FreeSurfer/SynthSeg (default: SynthSeg)<br>
    > *--subject_id*: subjectID of data, used in logging only<br>
-   > *--regions*: list of regions to process, defaults to 7 cortical regions<br>
    > *--use_gpu*: run SynthSeg mode using GPU (default: False)<br>
    > *--big_vents*: add flag to FreeSurfer command to aid in processing of subjects with large ventricles (default: false)<br>
    > *--large_FOV*: add flag to FreeSurfer command to aid in processing of subjects with large FOV (default: false)<br>
@@ -121,13 +120,10 @@ To install the necessary components for NeuroMPET, please follow the steps below
 ► surface_generation.py<br>
 ► Executed with the *--run_surface_generation* flag<br>
 ► Inputs:<br>
-   > *--segmentation_dir*: a folder of NIfTI binary segmentation files, or<br>
-   > --segmentations*: a comma seperated list of NIfTI binary segmentation files<br>
+   > *--segmentations*: a folder or comma seperated list of NIfTI binary segmentation files<br>
 
 ► Other Parameters:<br>
-   > *--regions*: list of regions to process, defaults to 7 cortical regions<br>
    > *--generate_global*: generate a global surface by subtracting the ventricles from wholebrain (default: true)<br>
-   > *--fs_surfaces*: generate .stl files using FreeSurfer tools, else use pyvista (default: false)<br>
 
 ***
 `Mesh Generation`<br>
@@ -135,27 +131,25 @@ To install the necessary components for NeuroMPET, please follow the steps below
 ► Currently the script cannot be executed in Simpleware via the command line<br>
 ► Future work will implement automated processing of the script to remove the need to run in the Simpleware GUI.<br>
 ► Inputs:<br>
-   > *--surface_dir*: a folder of .stl surface files<br>
+   > *--surfaces*: a folder or comma seperated list of .stl surface files<br>
 
 ► Other Parameters:<br>
-   > *--starting_coarseness*: dictionary of mesh coarseness values to start iterations from (default: -50 for all)<br>
+   > *--starting_coarseness*: dictionary of mesh coarseness values to start iterations from<br>
    > *--coarseness_steps*: number of coarsness values to try when generating mesh (default: 15)<br>
    > *--target_global_elements*: target element count for global mesh (default: 2_500_000)<br>
-   > *--tolerance_frac*: tolerance fraction for actual elements vs target elements (default: 0.2)<br>
+   > *--tolerance*: tolerance fraction for actual elements vs target elements (default: 0.2)<br>
 
 ***
 `Mesh Mapping`<br>
 ► mesh_map.py<br>
 ► Executed with the *--run_mesh_mapping* flag<br>
 ► Inputs:<br>
-   > *--mesh_dir*: a folder of .vtk format mesh files,<br>
-   > *--surface_dir* (optional): a folder containing a wholebrain.stl file to be used for outer surface fixing,<br>
+   > *--meshes*: a folder or comma seperated list of .vtk format mesh files,<br>
    > *--dwi_dir* (optional): a folder containing DWI input images,<br>
    > *--cbf_dir* (optional): a folder containing CBF input images<br>
 
 ► Other Parameters:<br>
    > *--adjust_labels_dwi*: adjust mesh labels based on DWI inputs supplied with --dwi_dir (default: false)<br>
-   > *--adjust_outer_labels*: adjust outer labels of the mesh based on a wholebrain.stl file supplied with --surface_dir (default: false)<br>
    > *--generate_cbf_map*: generate an CBF scalar map from a CBF NIfti image supplied with --cbf_dir (default: false)<br>
    > *--generate_fa_map*: generate an FA scalar map from a FA NIfti image supplied with --dwi_dir (default: false)<br>
 
@@ -164,10 +158,10 @@ To install the necessary components for NeuroMPET, please follow the steps below
 ► solver.py<br>
 ► Executed with the *--run_modelling* flag<br>
 ► Inputs:<br>
-   > *--mesh_dir*: a folder of .vtk format mesh files, and<br>
-   > *--surface_dir*: a folder containing a wholebrain.stl and ventricles.stl file to be used in creation of .bit file,<br>
-   > *--labels_fpath*: path to an ROI labels .txt file,<br>
-   > *--bc_fpath* (optional): path to a boundary condition .csv file (default: general healthy control BC file)<br>
+   > *--meshes*: a folder or comma seperated list containing a global.vtk format mesh file, and<br>
+   > *--surfaces*: a folder or comma seperated list containing a wholebrain.stl and ventricles.stl file to be used in creation of .bit file,<br>
+   > *--labels_file*: path to an ROI labels .txt file,<br>
+   > *--bc_file* (optional): path to a boundary condition .csv file (default: general healthy control BC file)<br>
 
 ► Other Parameters:<br>
    > *--timestep_size*: size of timestep (default: 0.1)<br>
@@ -191,8 +185,7 @@ Output directory
 │   │   └── N4_corrected
 │   ├── registration
 │   ├── segmentation
-│   │   ├── {region} outputs
-│   │   └── fs_outputs
+│   │   └── {region}
 │   ├── surface_generation
 │   │   └── surfaces
 │   ├── mesh_generation
@@ -200,7 +193,6 @@ Output directory
 │   └── mesh_mapping
 │       ├── global_mesh_info
 │       ├── regional_mesh_info
-│       ├── surface_info
 │       ├── regional_labels
 │       └── regional_labels.txt
 ├── outputs
@@ -212,7 +204,7 @@ Output directory
 │   ├── labels.txt
 │   ├── CBF_map.txt
 │   ├── FA_map.txt
-│   └── modelling_outputs
+│   └── modelling
 ├── logs
 ├── results.txt
 └── errors.txt
