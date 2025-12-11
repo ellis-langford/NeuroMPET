@@ -13,21 +13,21 @@ SUBJECTS = os.listdir(SURFACE_DIR)
 
 # Target and tolerances
 TARGET_GLOBAL_ELEMENTS = 2_500_000   # Target for global mesh elements
-TOLERANCE_FRAC = 0.20                # Element count relative tolerance (20%)
+TOLERANCE_FRAC = 0.15                # Element count relative tolerance
 COARSENESS_STEPS = 10                # Number of mesh_coarseness values to try
 
 REGIONS = {
-    "global": 10,
-    "brainstem_L": 10,
-    "brainstem_R": 10,
-    "cerebrum_L": -10,
-    "cerebrum_R": -10,
-    "cerebrumWM_L": -10,
-    "cerebrumWM_R": -10,
-    "cerebellum_L": 15,
-    "cerebellum_R": 15,
-    "cerebellumWM_L": -30,
-    "cerebellumWM_R": -30
+    "global": -10,
+    "brainstem_L": -10,
+    "brainstem_R": -10,
+    "cerebrum_L": -45,
+    "cerebrum_R": -45,
+    "cerebrumWM_L": -50,
+    "cerebrumWM_R": -50,
+    "cerebellum_L": -10,
+    "cerebellum_R": -10,
+    "cerebellumWM_L": -50,
+    "cerebellumWM_R": -50
 }
 
 # ------------------ FUNCTIONS -------------------
@@ -73,7 +73,7 @@ def fix_surface(subject, region, surface_path, outdir, rerun=False):
     if num_triangles < 500:
         # Too small number of triangles to be valid surface
         with open(os.path.join(outdir, "errors.txt"), "a") as f:
-            now = datetime.now().strftime('%d-%m-%Y %H:%M')
+            now = datetime.now().strftime("%d-%m-%Y %H:%M")
             f.write(f"[ Error | {now} ] Fixed surface does not contain enough elements {subject} {region}\n")
         doc.RemoveSurface(surface)
         success = False
@@ -198,7 +198,7 @@ def main():
         # Record start of meshing
         if not os.path.isfile(os.path.join(subject_outdir, "results.txt")):
             with open(os.path.join(subject_outdir, "results.txt"), "w") as rf:
-                now = datetime.now().strftime('%d-%m-%Y %H:%M')
+                now = datetime.now().strftime("%d-%m-%Y %H:%M")
                 rf.write(f"[ Log | {now} ] Starting meshing\n")
 
         # -------- FIX WHOLEBRAIN & VENTRICLE SURFACES --------
@@ -211,7 +211,7 @@ def main():
                     surface_fixed = fix_surface(subject, region, surface_path, outdir_region, rerun=True)
                     if surface_fixed == False:
                         with open(os.path.join(outdir_region, "errors.txt"), "a") as f:
-                            now = datetime.now().strftime('%d-%m-%Y %H:%M')
+                            now = datetime.now().strftime("%d-%m-%Y %H:%M")
                             f.write(f"[ Error | {now} ] Surface fixing for {region} failed after two attempts {subject}\n")
         
         # -------------------- GLOBAL MESH --------------------
@@ -259,7 +259,7 @@ def main():
                     surface_fixed = fix_surface(subject, "global", surface_path, outdir_global, rerun=True)
                     if surface_fixed == False:
                         with open(os.path.join(subject_outdir, "errors.txt"), "a") as f:
-                            now = datetime.now().strftime('%d-%m-%Y %H:%M')
+                            now = datetime.now().strftime("%d-%m-%Y %H:%M")
                             f.write(f"[ Error | {now} ] Global surface fixing failed after two attempts {subject}\n")
             
             # Skip to next subject if global surface cannot be fixed            
@@ -292,7 +292,7 @@ def main():
                         global_elements = num_elements
                         global_bbox = float(bbox_volume)
                         with open(results_path, "a") as f:
-                            now = datetime.now().strftime('%d-%m-%Y %H:%M')
+                            now = datetime.now().strftime("%d-%m-%Y %H:%M")
                             f.write(f"\n[ Log | {now} ] SELECTED MESH COARSENESS: {coarseness} \n")
                         break
                     else:
@@ -300,6 +300,7 @@ def main():
                         if discrepancy < smallest_discrepancy:
                             smallest_discrepancy = discrepancy
                             closest_coarseness = coarseness
+                            pct_diff = 100 * (num_elements / TARGET_GLOBAL_ELEMENTS)
                         # Move onto next coarseness
                         if os.path.exists(outdir_global):
                             for f in os.listdir(outdir_global):
@@ -316,14 +317,19 @@ def main():
                     )
 
                     with open(results_path, "a") as f:
-                        now = datetime.now().strftime('%d-%m-%Y %H:%M')
+                        now = datetime.now().strftime("%d-%m-%Y %H:%M")
                         f.write(f"\n[ Log | {now} ] SELECTED MESH COARSENESS: {closest_coarseness} \n")
+
+                    with open(os.path.join(subject_outdir, "results.txt"), "a") as f:
+                        now = datetime.now().strftime("%d-%m-%Y %H:%M")
+                        f.write(f"\n[ Log | {now} ] Global mesh not within tolerance. Closest "
+                                f"coarseness {closest_coarseness} {pct_diff:.0f}% \n")
 
                 # Global mesh failed
                 if not ok or smallest_discrepancy == float("inf"):
                     no_global_mesh = True
                     with open(os.path.join(subject_outdir, "errors.txt"), "a") as f:
-                        now = datetime.now().strftime('%d-%m-%Y %H:%M')
+                        now = datetime.now().strftime("%d-%m-%Y %H:%M")
                         f.write(f"[ Error | {now} ] Global meshing failed for subject {subject}\n")
                 else:
                     global_elements = num_elements
@@ -375,7 +381,7 @@ def main():
                         surface_fixed = fix_surface(subject, region, surface_path, outdir_region, rerun=True)
                         if surface_fixed == False:
                             with open(os.path.join(outdir_region, "errors.txt"), "a") as f:
-                                now = datetime.now().strftime('%d-%m-%Y %H:%M')
+                                now = datetime.now().strftime("%d-%m-%Y %H:%M")
                                 f.write(f"[ Error | {now} ] Surface fixing failed after two attempts {subject} {region}\n")
                             # Surface fixing unsuccessful, skipping to next region
                             continue
@@ -407,7 +413,7 @@ def main():
                         # Accept and stop iterating
                         found_within_tol = True
                         with open(results_path, "a") as f:
-                            now = datetime.now().strftime('%d-%m-%Y %H:%M')
+                            now = datetime.now().strftime("%d-%m-%Y %H:%M")
                             f.write(f"\n[ Log | {now} ] SELECTED MESH COARSENESS: {coarseness} \n")
                         break
                     else:
@@ -415,6 +421,7 @@ def main():
                         if discrepancy < smallest_discrepancy:
                             smallest_discrepancy = discrepancy
                             closest_coarseness = coarseness
+                            pct_diff = 100 * (num_elements / target_elements)
                         # Move onto next coarseness
                         if os.path.exists(outdir_region):
                             for f in os.listdir(outdir_region):
@@ -431,13 +438,18 @@ def main():
                         )
 
                         with open(results_path, "a") as f:
-                            now = datetime.now().strftime('%d-%m-%Y %H:%M')
+                            now = datetime.now().strftime("%d-%m-%Y %H:%M")
                             f.write(f"\n[ Log | {now} ] SELECTED MESH COARSENESS: {closest_coarseness} \n")
+
+                        with open(os.path.join(subject_outdir, "results.txt"), "a") as f:
+                            now = datetime.now().strftime("%d-%m-%Y %H:%M")
+                            f.write(f"\n[ Log | {now} ] {region} mesh not within tolerance. Closest "
+                                    f"coarseness {closest_coarseness} {pct_diff:.0f}% \n")
 
                     # Region mesh failed
                     if not ok or smallest_discrepancy == float("inf"):
                         with open(os.path.join(subject_outdir, "errors.txt"), "a") as f:
-                            now = datetime.now().strftime('%d-%m-%Y %H:%M')
+                            now = datetime.now().strftime("%d-%m-%Y %H:%M")
                             f.write(f"[ Error | {now} ] Region meshing failed for subject {subject} {region}\n")
                         continue
 
@@ -449,12 +461,12 @@ def main():
                 subject_success = False
                 # append error lines
                 with open(os.path.join(subject_outdir, "errors.txt"), "a" if os.path.exists(os.path.join(subject_outdir, "errors.txt")) else "w") as ef:
-                    now = datetime.now().strftime('%d-%m-%Y %H:%M')
+                    now = datetime.now().strftime("%d-%m-%Y %H:%M")
                     ef.write(f"[ Error | {now} ] No mesh produced for {subject} {region}\n")
 
         if subject_success:
             with open(os.path.join(subject_outdir, "results.txt"), "a") as rf:
-                now = datetime.now().strftime('%d-%m-%Y %H:%M')
+                now = datetime.now().strftime("%d-%m-%Y %H:%M")
                 rf.write(f"[ Log | {now} ] All meshes produced successfully\n")
 
 if __name__ == "__main__":

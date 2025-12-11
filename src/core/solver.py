@@ -36,7 +36,7 @@ class Solver(object):
         os.makedirs(self.modelling_outdir, exist_ok=True)
 
         # Define command
-        self.solver_command = f"make clean && make && " + \
+        self.solver_command = f"make clean && make -s && " + \
                               f"./MPET3D '{self.bit_file}' '{self.modelling_outdir}' " + \
                               f"{self.timestep_size} {self.timestep_count} " + \
                               f"{self.timestep_interval} '{self.bc_file}' " + \
@@ -65,14 +65,15 @@ class Solver(object):
 
         # Check required outputs have been produced
         for timestep in range(0, int(self.timestep_count * 50 / self.timestep_interval)):
-            result_file = os.path.join(self.modelling_outdir, f"ouputs_{timestep}.vtu")
+            result_file = os.path.join(self.modelling_outdir, f"outputs_{timestep}.vtu")
 
             if not os.path.exists(result_file):
                 self.loggers.errors(f"Solver has not produced an output file at timestep {timestep} " +
                                     f"- please check log file at {self.solver_log}")
-            elif not os.path.exists(os.path.join(self.modelling_outdir, f"ouputs_region.vtu")):
-                self.loggers.errors(f"Solver has not produced a regional output file " +
-                                    f"- please check log file at {self.solver_log}")
+        # Check regional file        
+        if not os.path.exists(os.path.join(self.modelling_outdir, f"outputs_region.vtu")):
+            self.loggers.errors(f"Solver has not produced a regional output file " +
+                                f"- please check log file at {self.solver_log}")
 
     def run_modelling(self):
         """
