@@ -13,17 +13,17 @@ SUBJECTS = os.listdir(SURFACE_DIR)
 
 # Target and tolerances
 TARGET_GLOBAL_ELEMENTS = 2_500_000   # Target for global mesh elements
-TOLERANCE_FRAC = 0.15                # Element count relative tolerance
+TOLERANCE_FRAC = 0.2                # Element count relative tolerance
 COARSENESS_STEPS = 10                # Number of mesh_coarseness values to try
 
 REGIONS = {
     "global": -10,
     "brainstem_L": -10,
     "brainstem_R": -10,
-    "cerebrum_L": -45,
-    "cerebrum_R": -45,
-    "cerebrumWM_L": -50,
-    "cerebrumWM_R": -50,
+    "cerebrum_L": -40,
+    "cerebrum_R": -40,
+    "cerebrumWM_L": -45,
+    "cerebrumWM_R": -45,
     "cerebellum_L": -10,
     "cerebellum_R": -10,
     "cerebellumWM_L": -50,
@@ -322,8 +322,12 @@ def main():
 
                     with open(os.path.join(subject_outdir, "results.txt"), "a") as f:
                         now = datetime.now().strftime("%d-%m-%Y %H:%M")
-                        f.write(f"\n[ Log | {now} ] Global mesh not within tolerance. Closest "
-                                f"coarseness {closest_coarseness} {pct_diff:.0f}% \n")
+                        if pct_diff > 50:
+                            f.write(f"[ Log | {now} ] Global mesh outside of initial tolerance. Closest "
+                                    f"coarseness {closest_coarseness} acceptable {pct_diff:.0f}% \n")
+                        elif pct_diff < 50:
+                            f.write(f"[ WARNING | {now} ] Global mesh not within tolerance. Closest "
+                                    f"coarseness {closest_coarseness} {pct_diff:.0f}% \n")
 
                 # Global mesh failed
                 if not ok or smallest_discrepancy == float("inf"):
@@ -443,8 +447,12 @@ def main():
 
                         with open(os.path.join(subject_outdir, "results.txt"), "a") as f:
                             now = datetime.now().strftime("%d-%m-%Y %H:%M")
-                            f.write(f"\n[ Log | {now} ] {region} mesh not within tolerance. Closest "
-                                    f"coarseness {closest_coarseness} {pct_diff:.0f}% \n")
+                            if pct_diff > 50:
+                                f.write(f"[ Log | {now} ] {region} mesh outside of initial tolerance. Closest "
+                                        f"coarseness {closest_coarseness} acceptable {pct_diff:.0f}% \n")
+                            elif pct_diff < 50:
+                                f.write(f"[ WARNING | {now} ] {region} mesh not within tolerance. Closest "
+                                        f"coarseness {closest_coarseness} {pct_diff:.0f}% \n")
 
                     # Region mesh failed
                     if not ok or smallest_discrepancy == float("inf"):
