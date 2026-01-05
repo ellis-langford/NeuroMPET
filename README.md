@@ -1,7 +1,7 @@
 <div align="center">
   <img src="./assets/neuro_mpet_logo.png" width="700">
   <br><br>
-  <p align="center"><strong>Neuro Multiple-Network Poroelastic Theory: Meshing & Modelling</strong></p>
+  <p align="center"><strong>Neuro Multiple-Network Poroelastic Theory: Image-to-Model Pipeline</strong></p>
 </div>
 
 <div align="center" style="display: flex; justify-content: center; gap: 10px; flex-wrap: wrap; margin-top: 10px;">
