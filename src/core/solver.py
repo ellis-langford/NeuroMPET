@@ -28,8 +28,9 @@ class Solver(object):
         """
         # Define parameters from config
         self.timestep_size = self.parameters["timestep_size"]
-        self.timestep_count = self.parameters["timestep_count"]
-        self.timestep_interval = self.parameters["timestep_interval"]
+        self.waveform_timesteps = self.parameters["waveform_timesteps"]
+        self.num_waveforms = self.parameters["num_waveforms"]
+        self.output_timestep_interval = self.parameters["output_timestep_interval"]
 
         # Outdir
         self.modelling_outdir = os.path.join(self.output_dir, "modelling")
@@ -38,9 +39,9 @@ class Solver(object):
         # Define command
         self.solver_command = f"make clean && make -s && " + \
                               f"./MPET3D '{self.bit_file}' '{self.modelling_outdir}' " + \
-                              f"{self.timestep_size} {self.timestep_count} " + \
-                              f"{self.timestep_interval} '{self.bc_file}' " + \
-                              f"'{self.labels_file}'"
+                              f"{self.timestep_size} {self.waveform_timesteps} " + \
+                              f"{self.num_waveforms} {self.output_timestep_interval} " + \
+                              f"'{self.bc_file}' '{self.labels_file}'"
 
         # Define location of MPET source code
         self.source_code_dir = "/app/opt/mpet_source_code"
@@ -64,7 +65,7 @@ class Solver(object):
                                 f"please check log file at {self.solver_log}")
 
         # Check required outputs have been produced
-        for timestep in range(0, int(self.timestep_count * 50 / self.timestep_interval)):
+        for timestep in range(0, ((self.waveform_timesteps * self.num_waveforms) + self.output_timestep_interval), self.output_timestep_interval):
             result_file = os.path.join(self.modelling_outdir, f"outputs_{timestep}.vtu")
 
             if not os.path.exists(result_file):

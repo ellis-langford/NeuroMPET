@@ -165,8 +165,9 @@ To install the necessary components for NeuroMPET, please follow the steps below
 
 ► Other Parameters:<br>
    > *--timestep_size*: size of timestep (default: 0.1)<br>
-   > *--timestep_count*: number of time steps per boundary condition waveform (default: 10)<br>
-   > *--timestep_interval*: interval between two VTU output files (default: 100)<br>
+   > *--waveform_timesteps*: number of time steps per boundary condition waveform (default: 10)<br>
+   > *--num_waveforms*: number of total boundary condition waveforms to use to ensure steady-state reached (default: 50)<br>
+   > *--output_timestep_interval*: interval between two VTU output files (default: 100)<br>
 
 
 ## Output Structure
