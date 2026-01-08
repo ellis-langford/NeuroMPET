@@ -115,7 +115,7 @@ class MeshLoaders(object):
         mesh = meshio.read(mesh_path)
         
         # Create output directory
-        if region not in ["global", "outer_surface"]:
+        if region not in ["global", "surface"]:
             output_dir = os.path.join(output_dir, region)
         os.makedirs(output_dir, exist_ok=True)
     

@@ -15,7 +15,7 @@ class MeshMap(object):
     def __init__(self, plugin_obj):
         # Check all expected attributed are present
         to_inherit = ["loggers", "parameters", "base_dir",
-                      "input_dir", "mesh_dir", 
+                      "input_dir", "mesh_dir", "surface_dir",
                       "interim_dir", "output_dir", "log_dir"]
         for attr in to_inherit:
             try:
@@ -38,6 +38,10 @@ class MeshMap(object):
         self.global_info_dir = os.path.join(self.interim_dir, "global_mesh_info")
         self.mesh_loader.extract_mesh_info(self.global_mesh, self.global_info_dir, "global")
 
+        self.surface_mesh = glob.glob(os.path.join(self.surface_dir, "**", "*wholebrain*.stl"), recursive=True)[0]
+        self.surface_info_dir = os.path.join(self.interim_dir, "surface_info")
+        self.mesh_loader.extract_mesh_info(self.surface_mesh, self.surface_info_dir, "surface", cell_type="tri")
+
         # Extract regional mesh information
         regions = self.parameters["regions"].split(",")
         for region in regions:
@@ -51,14 +55,16 @@ class MeshMap(object):
         self.global_mesh_node_coords = self.mesh_loader.read_txt(os.path.join(self.global_info_dir, "global_node_coords.txt"), dtype=float) # Node coords
         self.global_mesh_tetra_indices = self.mesh_loader.read_txt(os.path.join(self.global_info_dir, "global_tetra_indices.txt"), dtype=int, index_file=True) # Tetrahedra node indices
         self.global_mesh_tetra_neighbours = self.mesh_loader.read_txt(os.path.join(self.global_info_dir, "global_tetra_neighbours.txt"), dtype=int, index_file=True) # Shared tetrahedra faces
+        self.surface_node_coords = self.mesh_loader.read_txt(os.path.join(self.surface_info_dir, "surface_node_coords.txt"), dtype=float) # Node coords
         
     def classify_tetrahedra(self):
         """
         Classify which region each tetrahedral element belongs to
         - Create global KDTree
-        - Create reigon KDTrees
+        - Create region KDTrees
         - Match each node to closest region
         - Match any unlabelled nodes to closest labelled node
+        - Change any cerebrumWM nodes which touch the outer surface to GM
         - Log node labelling information
         """
         label_arrays = []
@@ -74,6 +80,7 @@ class MeshMap(object):
         }
 
         # Load node tree
+        tree_surface = KDTree(self.surface_node_coords)
         tree_global = KDTree(self.global_mesh_node_coords)
 
         # Loop over each region
@@ -125,7 +132,7 @@ class MeshMap(object):
                 labels_chunk[both_idx[closer_to_R]] = self.regions[region][1]
 
                 labels[start:end] = labels_chunk
-        
+                    
             # Save output
             output_file = os.path.join(self.interim_dir, "region_labels",  f"{region}_labels.txt")
             os.makedirs(os.path.join(self.interim_dir, "region_labels"), exist_ok=True)
@@ -154,6 +161,20 @@ class MeshMap(object):
     
         # Assign the same label
         combined_labels[unlabelled_idx] = combined_labels[labelled_idx[nearest]]
+
+        # Work out if surface node based on proximity
+        surface_dists, _ = tree_surface.query(self.global_mesh_node_coords, k=1)
+        surface_tol = 0.75 # Tolerance
+        is_surface_node = surface_dists < surface_tol # Assignment
+        
+        # Reassign any surface nodes from WM to GM
+        wm_to_gm = {
+            self.regions["cerebrumWM"][0]: self.regions["cerebrum"][0],
+            self.regions["cerebrumWM"][1]: self.regions["cerebrum"][1],
+        }
+        for wm_label, gm_label in wm_to_gm.items():
+            mask = (combined_labels == wm_label) & is_surface_node
+            combined_labels[mask] = gm_label
 
         # Save combined labels
         output_file = os.path.join(self.interim_dir, "regional_node_labels.txt")

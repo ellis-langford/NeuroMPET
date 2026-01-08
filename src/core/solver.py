@@ -80,16 +80,16 @@ class Solver(object):
         """
         Running modelling processing
         """
-        self.loggers.plugin_log("Running MPET solver")
         self.interim_dir = os.path.join(self.interim_dir, "modelling")
         os.makedirs(self.interim_dir, exist_ok=True)
-        
-        # Define meshes
-        self.mesh_file = glob.glob(os.path.join(self.mesh_dir, "**", "global.vtk"), recursive=True)[0]
-        
-        # Define surface files
-        self.wb_surface = glob.glob(os.path.join(self.surface_dir, "**", "*wholebrain*.stl"), recursive=True)[0]
-        self.vent_surface = glob.glob(os.path.join(self.surface_dir, "**", "*ventricles*.stl"), recursive=True)[0]
+
+        # Define meshes and surface files
+        try:
+            self.mesh_file = glob.glob(os.path.join(self.mesh_dir, "**", "global.vtk"), recursive=True)[0]
+            self.wb_surface = glob.glob(os.path.join(self.surface_dir, "**", "*wholebrain*.stl"), recursive=True)[0]
+            self.vent_surface = glob.glob(os.path.join(self.surface_dir, "**", "*ventricles*.stl"), recursive=True)[0]
+        except Exception as e:
+            self.loggers.errors(f"Unable to locate required mesh and surface files - {e}")
 
         # Produce custom .bit file
         self.loggers.plugin_log("Creating custom .bit file")
@@ -98,6 +98,9 @@ class Solver(object):
                                                         self.wb_surface,
                                                         self.vent_surface,
                                                         self.bit_file)
+        if not os.path.isfile(self.bit_file):
+            self.loggers.errors(f"Failed to generate custom .bit file " +
+                                f"- please check log file at {self.solver_log}")
         
         # Produce inner and outer vtu files for visualisation
         self.mesh_loader.extract_surfaces_from_bit(self.bit_file,
