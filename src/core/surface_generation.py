@@ -6,7 +6,7 @@ import numpy as np
 import nibabel as nib
 import pyvista as pv
 from skimage import measure
-from scipy.ndimage import gaussian_filter, binary_dilation
+from scipy.ndimage import gaussian_filter, binary_dilation, binary_closing, generate_binary_structure
 from scipy.spatial import KDTree
 from collections import deque
 
@@ -62,7 +62,7 @@ class SurfaceGen(object):
         try:
             vent_bin = glob.glob(os.path.join(self.segmentation_dir, f"*ventricles*.nii.gz"), recursive=True)[0]
         except:
-            self.loggers.errors(f"A ventricles segmentations must be provided if --generate_global is True")
+            self.loggers.errors(f"A ventricles segmentation must be provided if --generate_global is True")
         vent_data = nib.load(vent_bin).get_fdata().astype(bool)
         vent_affine = nib.load(vent_bin).affine
         
@@ -95,6 +95,10 @@ class SurfaceGen(object):
         interior_holes = (~visited) & (~wb_data)
         wb_data[interior_holes] = True # Fill them
 
+        # Close diagonal pinholes & single-voxel gaps
+        struct26 = generate_binary_structure(3, 2)
+        wb_data = binary_closing(wb_data, structure=struct26, iterations=1)
+
         ### Separate touching surfaces ###
         radius=2
         max_iter = 5
@@ -110,6 +114,15 @@ class SurfaceGen(object):
             # Dilate the touching region
             localised_growth = binary_dilation(touching, structure=struct)
             wb_data |= localised_growth # Grow wholebrain mask locally
+
+        # Pad volumes to prevent open boundaries in marching cubes
+        pad = 1
+        wb_data = np.pad(wb_data, pad, mode="constant", constant_values=False)
+        vent_data = np.pad(vent_data, pad, mode="constant", constant_values=False)
+    
+        wb_affine = wb_affine.copy()
+        wb_affine[:3, 3] -= pad * np.diag(wb_affine)[:3]
+        vent_affine = wb_affine
         
         ### Generate surfaces ###
         wb_surf = self.segmentation_to_surface(wb_data, wb_affine)
@@ -153,6 +166,15 @@ class SurfaceGen(object):
             distances, _ = tree.query(vent_surf.points)
             if np.any(distances < 0.1):
                 self.loggers.errors(f"Global surface generation failed - overlaps present")
+
+        # Final watertightness surface repair
+        if not wb_surf.is_manifold:
+            wb_surf = wb_surf.clean(
+                tolerance=1e-6,
+                remove_non_manifold_edges=True,
+                remove_degenerate_cells=True,
+                inplace=False,
+            )
 
         # Check watertight
         if not wb_surf.is_all_triangles:
