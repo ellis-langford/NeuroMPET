@@ -472,19 +472,19 @@ def main():
                     now = datetime.now().strftime("%d-%m-%Y %H:%M")
                     ef.write(f"[ Error | {now} ] No mesh produced for {subject} {region}\n")
 
-    if subject_success:
-        results_path = os.path.join(subject_outdir, "results.txt")
-        log_line = "All meshes produced successfully"
-    
-        already_logged = False
-        if os.path.exists(results_path):
-            with open(results_path, "r") as rf:
-                already_logged = log_line in rf.read()
-    
-        if not already_logged:
-            with open(results_path, "a") as rf:
-                now = datetime.now().strftime("%d-%m-%Y %H:%M")
-                rf.write(f"[ Log | {now} ] {log_line}\n")
+        if subject_success:
+            results_path = os.path.join(subject_outdir, "results.txt")
+            log_line = "All meshes produced successfully"
+        
+            already_logged = False
+            if os.path.exists(results_path):
+                with open(results_path, "r") as rf:
+                    already_logged = log_line in rf.read()
+        
+            if not already_logged:
+                with open(results_path, "a") as rf:
+                    now = datetime.now().strftime("%d-%m-%Y %H:%M")
+                    rf.write(f"[ Log | {now} ] {log_line}\n")
 
 if __name__ == "__main__":
     main()

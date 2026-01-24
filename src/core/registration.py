@@ -23,12 +23,13 @@ class Registration(object):
         """
         Performs a registration between an image pair 
 
-        Args:
-            reg_type (str)            : Type of registration
-            moving_image (str)        : Path to moving image
-            fixed_image (str)         : Path to fixed image
-            moving_out (str)          : Path to output transformed moving image
-            fixed_out (str) : Path to output fixed image.
+        Parameters:
+        ---
+        reg_type (str)      : Type of registration
+        moving_image (str)  : Path to moving image
+        fixed_image (str)   : Path to fixed image
+        moving_out (str)    : Path to output transformed moving image
+        fixed_out (str)     : Path to output fixed image.
         """      
         try:
             fixed_image  = ants.image_read(fixed_im_path)
@@ -84,6 +85,12 @@ class Registration(object):
     def revert_intensities(self, orig_im, reg_im, outpath):
         """
         Revert post-registration image intensities
+
+        Parameters:
+        ---
+        orig_im (str) : Path to original NIfTI image
+        reg_im (str) : Path to registered image to be intensity reverted
+        outpath (str) : Path to save intensity reverted image to
         """
         # Load images and extract data
         input_data = nib.load(orig_im).get_fdata()

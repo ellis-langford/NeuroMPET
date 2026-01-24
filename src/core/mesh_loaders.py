@@ -204,13 +204,19 @@ class MeshLoaders(object):
         Converts a VTK tetrahedral mesh and surface STLs into a custom .bit mesh format
         with $Node, $OuterFaceCell, $InnerFaceCell, $TetraCell sections. The inner and outer
         faces are extracted directly from the tetra mesh to ensure perfect conformity.
+        
+        Parameters:
+        ---
+        vtk_path (str) : Path to directory containing .vtk mesh file
+        wholebrain_stl (str) : Path to directory containing wholebrain .stl surface file
+        ventricles_stl (str) : Path to directory containing ventricles .stl surface file
+        output_file (str): Path to directory to save custom .bit file to
         """
-        # -------------------------------
-        # Convert from new to legacy format (if needed)
-        # -------------------------------
+        # Read vtk data
         with open(vtk_path, "r") as f:
             lines = f.read().splitlines()
-    
+
+        # Convert from new to legacy format
         if any(line.strip().startswith("OFFSETS") for line in lines):
             converted_path = vtk_path.replace(".vtk", "_legacy.vtk")
             out_lines = []
@@ -228,7 +234,7 @@ class MeshLoaders(object):
                     while not lines[i].startswith("CONNECTIVITY"):
                         offsets.extend(map(int, lines[i].split()))
                         i += 1
-                    i += 1  # skip CONNECTIVITY
+                    i += 1  # Skip CONNECTIVITY
                     while not lines[i].startswith("CELL_TYPES"):
                         connectivity.extend(map(int, lines[i].split()))
                         i += 1
@@ -248,14 +254,13 @@ class MeshLoaders(object):
                 else:
                     out_lines.append(line)
                 i += 1
-    
+
+            # Save converted file
             with open(converted_path, "w") as f:
                 f.write("\n".join(out_lines))
             vtk_path = converted_path
     
-        # -------------------------------
         # Read Points
-        # -------------------------------
         with open(vtk_path, "r") as f:
             lines = f.readlines()
     
@@ -270,9 +275,7 @@ class MeshLoaders(object):
             i += 1
         points = np.array(coords).reshape((n_points, 3))
     
-        # -------------------------------
         # Read Tetra Cells
-        # -------------------------------
         cell_idx = next(i for i, l in enumerate(lines) if l.strip().startswith("CELLS"))
         n_cells = int(lines[cell_idx].split()[1])
         total_entries = int(lines[cell_idx].split()[2])
@@ -288,15 +291,11 @@ class MeshLoaders(object):
         tets = [l for l in tetra_lines if len(l) == 5 and l[0] == "4"]
         tets_idx = np.array([[int(l[1]), int(l[2]), int(l[3]), int(l[4])] for l in tets])
     
-        # -------------------------------
         # Load STL surfaces
-        # -------------------------------
-        wb_surf = pv.read(wholebrain_stl)     # outer surface
-        vent_surf = pv.read(ventricles_stl)   # inner surface
+        wb_surf = pv.read(wholebrain_stl)     # Outer surface
+        vent_surf = pv.read(ventricles_stl)   # Inner surface
     
-        # -------------------------------
         # Extract boundary faces from tetra mesh
-        # -------------------------------
         faces = []
         for tet in tets_idx:
             n0, n1, n2, n3 = tet
@@ -309,9 +308,7 @@ class MeshLoaders(object):
         face_count = Counter(faces)
         surface_faces = np.array([f for f, c in face_count.items() if c == 1])
     
-        # -------------------------------
         # Classify inner vs outer using STL distance
-        # -------------------------------
         tree_outer = KDTree(wb_surf.points)
         tree_inner = KDTree(vent_surf.points)
         face_centroids = points[surface_faces].mean(axis=1)
@@ -319,36 +316,27 @@ class MeshLoaders(object):
         dist_outer, _ = tree_outer.query(face_centroids)
         dist_inner, _ = tree_inner.query(face_centroids)
 
-        # -------------------------------
         # Distance-based tie-breaking to prefer inner surface
-        # -------------------------------
-        # difference: positive means closer to inner surface
+        # Difference: positive means closer to inner surface
         dist_diff = dist_outer - dist_inner
         
-        # threshold in mm for "similar enough"
-        threshold_mm = 0.5     # YOU CAN TUNE: 0.3–0.6 mm works well
+        # Threshold in mm
+        threshold_mm = 0.5
         
-        # Apply rule:
-        # if distances are nearly equal (within threshold), force inner assignment
+        # If distances within threshold, force inner assignment
         prefer_inner = np.abs(dist_diff) < threshold_mm
         
-        # initial classification
+        # Initial classification
         initial_inner = dist_inner < dist_outer
         
-        # refined classification
+        # Refined classification
         inner_mask = initial_inner | prefer_inner
         outer_mask = ~inner_mask
 
+        inner_faces = surface_faces[inner_mask] # dist_inner < dist_outer
+        outer_faces = surface_faces[outer_mask] # ~inner_mask
     
-        # inner_mask = dist_inner < dist_outer
-        # outer_mask = ~inner_mask
-    
-        inner_faces = surface_faces[inner_mask]
-        outer_faces = surface_faces[outer_mask]
-    
-        # -------------------------------
         # Write .bit file
-        # -------------------------------
         with open(output_file, "w") as f:
             # Nodes
             f.write("$Node\n")
@@ -381,6 +369,11 @@ class MeshLoaders(object):
     def extract_surfaces_from_bit(self, bit_file, outdir):
         """
         Extract inner and outer surface from .bit for visualisation
+
+        Parameters:
+        ---
+        bit_file (str) : Path to .bit mesh file
+        outdir (str) : Directory to save inner and outer surface .vtu files to
         """
         nodes = []
         inner_faces = []
@@ -398,7 +391,6 @@ class MeshLoaders(object):
                 count = int(lines[i+1])
                 for j in range(count):
                     parts = lines[i+2+j].split()
-                    # expected: ID x y z
                     nodes.append([float(parts[1]), float(parts[2]), float(parts[3])])
                 i += 2 + count
                 continue
@@ -408,9 +400,8 @@ class MeshLoaders(object):
                 count = int(lines[i+1])
                 for j in range(count):
                     parts = lines[i+2+j].split()
-                    # Format: 3 o n1 n2 n3
                     n1, n2, n3 = map(int, parts[2:5])
-                    outer_faces.append([n1-1, n2-1, n3-1])  # to 0-based index
+                    outer_faces.append([n1-1, n2-1, n3-1])
                 i += 2 + count
                 continue
     
@@ -419,7 +410,6 @@ class MeshLoaders(object):
                 count = int(lines[i+1])
                 for j in range(count):
                     parts = lines[i+2+j].split()
-                    # Format: 3 i n1 n2 n3
                     n1, n2, n3 = map(int, parts[2:5])
                     inner_faces.append([n1-1, n2-1, n3-1])
                 i += 2 + count

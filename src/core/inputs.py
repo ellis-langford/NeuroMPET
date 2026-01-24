@@ -22,6 +22,10 @@ class Inputs(object):
     def check_input_dir(self, input_flag):
         """
         Helper function which checks and cleans directory inputs
+
+        Parameters:
+        ---
+        input_flag (str) : Command line flag
         """
         # Check if required input has been provided
         if not self.parameters[input_flag]:
@@ -56,6 +60,11 @@ class Inputs(object):
     def check_input_file(self, input_flag, ext):
         """
         Helper function which checks and cleans file inputs
+        
+        Parameters:
+        ---
+        input_flag (str) : Command line flag
+        ext (str) : File extension
         """
         # Check if required input has been provided
         if not self.parameters[input_flag]:
@@ -122,6 +131,10 @@ class Inputs(object):
     def prepare_surface_inputs(self, fixed_surfaces=False):
         """
         Copy surface inputs to working directory
+        
+        Parameters:
+        ---
+        fixed_surfaces (bool) : If True, fixed surfaces are pulled from mesh_dir
         """
         # Inputs provided
         if not self.parameters["run_surface_generation"]:

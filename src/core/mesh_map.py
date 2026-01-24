@@ -118,11 +118,11 @@ class MeshMap(object):
                 in_L = dist_L < tol_L
                 in_R = dist_R < tol_R
 
-                # Case 1: only in left
+                # Only in left
                 labels_chunk[in_L & ~in_R] = self.regions[region][0]
-                # Case 2: only in right
+                # Only in right
                 labels_chunk[in_R & ~in_L] = self.regions[region][1]
-                # Case 3: in both — pick whichever is closer
+                # In both, pick closer
                 both = in_L & in_R
                 closer_to_L = dist_L[both] < dist_R[both]
                 closer_to_R = ~closer_to_L

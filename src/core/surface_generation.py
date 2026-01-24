@@ -27,6 +27,12 @@ class SurfaceGen(object):
     def segmentation_to_surface(self, segmentation, affine, smooth_sigma=0.7):
         """
         Converts binary segmentation to PyVista surface.
+
+        Parameters:
+        ---
+        segmentation (np.array) : Data from binary segmentation
+        affine (matrix) : Affine matrix for segmentation
+        smooth_sigma (float) : Smoothing value to apply
         """
         data = gaussian_filter(segmentation.astype(float), sigma=smooth_sigma)
         data = (data - data.min()) / (data.max() - data.min())
@@ -201,6 +207,10 @@ class SurfaceGen(object):
     def generate_region_surface(self, region):
         """
         Generate regional surface files
+
+        Parameters:
+        ---
+        region (str) : Region to generate surface of
         """
         # Global composite
         if region not in ["global", "wholebrain", "ventricles"]:            

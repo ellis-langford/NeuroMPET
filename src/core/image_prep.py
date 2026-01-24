@@ -24,7 +24,7 @@ class ImagePrep(object):
         """
         Reset the origin of the image to the centre of the brain
 
-        Params:
+        Parameters:
         ---
         input_im (str)        : Path to input image to be reset
         output_im (str)       : Path to save origin reset image to
@@ -56,12 +56,10 @@ class ImagePrep(object):
         """
         Perform N4 bias field correction using ANTsPy.
     
-        Params:
+        Parameters:
         ---
         input_im (str)                  : Path to the input NIfTI image.
         output_im (str)                 : Path to save the bias-corrected image.
-        shrink_factor (int)             : Shrinking factor to speed up processing (default: 4).
-        convergence (tuple)             : (max_iterations, convergence_threshold) (default: (50, 0.001)).
         mask (ants.ANTsImage, optional) : Optional binary mask to constrain correction.
         """
         # Load the image
@@ -94,7 +92,7 @@ class ImagePrep(object):
         """
         Normalises image intensity so that the white matter peak maps to rescale_max.
         
-        Params:
+        Parameters:
         ---
         input_im (str)    : Path to input image
         output_im (str)   : Path to save intensity-normalized image
@@ -119,7 +117,7 @@ class ImagePrep(object):
                 self.loggers.errors("Could not find intensity peaks in histogram")
                 return
     
-            # Assume white matter peak is the highest peak (could refine further)
+            # Assume white matter peak is the highest peak
             wm_peak_index = peaks[np.argmax(hist[peaks])]
             wm_peak_intensity = bin_edges[wm_peak_index]
     
