@@ -1,490 +1,263 @@
 # Imports
 import os
+import sys
+import glob
 import shutil
-from datetime import datetime
-import simpleware.scripting as sw
-from simpleware.scripting import SurfaceFixingControlParameters, Model
+import numpy as np
+import pyvista as pv
+import pytetwild
 
-# --------------- CONFIG & INPUTS ----------------
-BASE_DIR = r"D:\ellis\mnt\projects\neuro_mpet"
-SURFACE_DIR = os.path.join(BASE_DIR, "3.surface_generation")
-OUTDIR = os.path.join(BASE_DIR, "4.meshing")
-SUBJECTS = os.listdir(SURFACE_DIR)
 
-# Target and tolerances
-TARGET_GLOBAL_ELEMENTS = 2_500_000   # Target for global mesh elements
-TOLERANCE_FRAC = 0.2                 # Element count relative tolerance
-COARSENESS_STEPS = 50                # Number of mesh_coarseness values to try
+class MeshGen(object):
+    """Class setup"""
+    def __init__(self, plugin_obj):
+        # Check all expected attributes are present
+        to_inherit = [
+            "loggers",
+            "parameters",
+            "interim_dir",
+            "output_dir",
+            "surface_dir",
+            "regions",
+        ]
+        for attr in to_inherit:
+            try:
+                setattr(self, attr, getattr(plugin_obj, attr))
+            except AttributeError as e:
+                print(f"Attribute Error - {e}")
+                sys.exit(1)
 
-REGIONS = {
-    "global": -10,
-    "brainstem_L": -10,
-    "brainstem_R": -10,
-    "cerebrum_L": -40,
-    "cerebrum_R": -40,
-    "cerebrumWM_L": -45,
-    "cerebrumWM_R": -45,
-    "cerebellum_L": -10,
-    "cerebellum_R": -10,
-    "cerebellumWM_L": -50,
-    "cerebellumWM_R": -50
-}
+    def count_tetrahedra(self, tet_mesh: pv.UnstructuredGrid) -> int:
+        """
+        Count tetrahedral cells in a PyVista UnstructuredGrid.
 
-# ------------------ FUNCTIONS -------------------
-def get_parameters(surface_path, volume_fpath=""):
-    doc = sw.App.GetDocument()
-    doc.ImportSurfaceFromStlFile(surface_path, False, 1.0, False)
-    num_triangles = doc.GetActiveSurface().GetPolygonCount()
-    b = doc.GetActiveSurface().GetBounds()
-    bbox_volume = (b[1]-b[0])*(b[3]-b[2])*(b[5]-b[4])
-    doc.RemoveSurface(doc.GetActiveSurface())
+        Parameters:
+        ---
+        tet_mesh (pv.UnstructuredGrid) : The mesh to count tetrahedra in.
 
-    if volume_fpath:
-        doc.ImportVolumeMeshFromFile(volume_fpath, 1.0, False)
-        num_elements = doc.GetActiveVolumeMesh().GetElementCount()
-        doc.RemoveVolumeMesh(doc.GetActiveVolumeMesh())
-        return bbox_volume, num_triangles, num_elements
-    else:
-        return bbox_volume, num_triangles
+        Returns:
+        ---
+        int : The number of tetrahedral cells in the mesh.
+        """
+        # Check if 'celltypes' exists and is not empty
+        celltypes = getattr(tet_mesh, "celltypes", None)
+        if celltypes is None:
+            return int(tet_mesh.n_cells)
 
-def fix_surface(subject, region, surface_path, outdir, rerun=False):
-    """
-    Try to import surface, fix it (1 or 2 rounds), create FE model, generate mesh, export vtk.
-    Returns: True if surface successfully fixed.
-    If mesh generation fails returns False and writes errors.txt in outdir.
-    """
-    os.makedirs(outdir, exist_ok=True)
-    doc = sw.App.GetDocument()
+        celltypes = np.asarray(celltypes)
+        if celltypes.size == 0:
+            return 0
 
-    doc.ImportSurfaceFromStlFile(surface_path, False, 1.0, False)
-    surface = doc.GetActiveSurface()
-    surface.SetName(region)
+        # Count cells of type VTK_TETRA (10)
+        vtk_tetra = 10
+        tetra_count = int(np.sum(celltypes == vtk_tetra))
 
-    # Apply surface fixing
-    surface.Fix(SurfaceFixingControlParameters(9.9999999999999995e-07,
-                                                1.0000000000000001e-09))
+        return tetra_count if tetra_count > 0 else int(tet_mesh.n_cells)
 
-    if rerun:
-        surface.Fix(SurfaceFixingControlParameters(9.9999999999999995e-07,
-                                                    1.0000000000000001e-09))
+    def resolve_surface_path(self, region: str) -> str:
+        """
+        Resolve the exact surface file path for a region.
 
-    # Triangle count & basic sanity check
-    num_triangles = surface.GetPolygonCount()
-    if num_triangles < 500:
-        # Too small number of triangles to be valid surface
-        with open(os.path.join(outdir, "errors.txt"), "a") as f:
-            now = datetime.now().strftime("%d-%m-%Y %H:%M")
-            f.write(f"[ Error | {now} ] Fixed surface does not contain enough elements {subject} {region}\n")
-        doc.RemoveSurface(surface)
-        success = False
-        return success
+        Parameters:
+        ---
+        region (str)   : Region name to resolve.
 
-    # Setup for meshing
-    doc.CreateFeModel(region)
-    doc.EnableObjectsMode()
-    model = doc.GetModelByName(region)
-    model.AddSurface(surface)
-    doc.EnableModelsMode()
-    model.SetExportType(Model.VtkVolume)
-    model.SetCompoundCoarsenessOnPart(model.GetPartByName(region), -50)
+        Returns:
+        ---
+        str : File path to the region STL surface.
+        """
+        # Find matching STL file for the region
+        matches = glob.glob(
+            os.path.join(self.surface_dir, "**", f"{region}.stl"),
+            recursive=True,
+        )
 
-    # Attempt to generate mesh
-    try:
-        doc.GenerateMesh()
-        outpath = os.path.join(outdir, f"{region}.vtk")
-        doc.ExportVtkVolume(outpath, False)
-        success = True
-        surface.Export(os.path.join(outdir, f"{region}.stl"), False)
-        doc.RemoveModel(model)
-        doc.RemoveSurface(surface)
-    except Exception as e:
+        # Check for no matches or multiple matches
+        if len(matches) == 0:
+            self.loggers.errors(
+                f"Surface file {region}.stl does not exist in {self.surface_dir}"
+            )
+
+        if len(matches) > 1:
+            self.loggers.errors(
+                f"Multiple surface files matched {region}.stl in {self.surface_dir}: {matches}"
+            )
+
+        return matches[0]
+
+    def generate_mesh(
+        self,
+        stl_file: str,
+        outpath: str = None,
+        edge_length_abs: float = 2.0,
+        edge_length_fac: float = 0.05,
+        epsilon: float = 1e-3,
+        optimise: bool = True,
+        coarsen: bool = False,
+        simplify: bool = True,
+        num_threads: int = 0,
+    ) -> pv.UnstructuredGrid:
+        """
+        Generate a tetrahedral mesh from an STL surface.
+
+        Parameters:
+        ---
+        stl_file (str)          : Path to the input STL surface.
+        outpath (str)           : Optional path to save the generated mesh.
+        edge_length_abs (float) : Absolute target tetrahedral edge length.
+        edge_length_fac (float) : Relative target edge length as a fraction of bounding-box diagonal.
+        epsilon (float)         : Envelope size relative to bounding-box diagonal.
+        optimise (bool)         : If True, optimise the generated mesh.
+        coarsen (bool)          : If True, coarsen the generated mesh where possible.
+        simplify (bool)         : If True, simplify the input surface before meshing.
+        num_threads (int)       : Number of threads to use. Zero uses all available cores.
+
+        Returns:
+        ---
+        pv.UnstructuredGrid : The generated tetrahedral mesh.
+        """
+        # Mesh generation
         try:
-            # Try meshing with a different coarseness value
-            model.SetCompoundCoarsenessOnPart(model.GetPartByName(region), -40)
-            doc.GenerateMesh()
-            outpath = os.path.join(outdir, f"{region}.vtk")
-            doc.ExportVtkVolume(outpath, False)
-            success = True
-            surface.Export(os.path.join(outdir, f"{region}.stl"), False)
-            doc.RemoveModel(model)
-            doc.RemoveSurface(surface)
+            # Read STL as PyVista PolyData
+            surf = pv.read(stl_file)
+            if surf.n_cells == 0:
+                self.loggers.errors(f"No cells found in {stl_file}")
+
+            # Tetrahedralise with pytetwild
+            tet = pytetwild.tetrahedralize_pv(
+                surf,
+                edge_length_abs=edge_length_abs,
+                edge_length_fac=edge_length_fac,
+                epsilon=epsilon,
+                optimize=optimise,
+                simplify=simplify,
+                coarsen=coarsen,
+                num_threads=num_threads,
+            )
         except Exception as e:
-            success = False
+            self.loggers.errors(f"Mesh generation failed for {stl_file}: {e}")
+
+        # Save mesh if outpath provided
+        if outpath:
             try:
-                doc.RemoveModel(model)
-            except:
-                pass
-            try:
-                doc.RemoveSurface(surface)
-            except:
-                return success
-    
-    return success
+                tet.save(outpath)
+            except Exception as e:
+                self.loggers.errors(f"Failed to save mesh to {outpath}: {e}")
 
-def generate_mesh(subject, region, coarseness, surface_path, outdir, target_elements):
-    """
-    Try to import surface, fix it (1 or 2 rounds), create FE model, generate mesh, export vtk.
-    Returns: (num_elements, bbox_volume, mesh_generated)
-    If mesh generation fails returns (None, None, False) and writes errors.txt in outdir.
-    """
-    os.makedirs(outdir, exist_ok=True)
-    doc = sw.App.GetDocument()
+        return tet
 
-    # Import STL
-    doc.ImportSurfaceFromStlFile(surface_path, False, 1.0, False)
-    surface = doc.GetActiveSurface()
-    surface.SetName(region)
+    def generate_global_mesh_with_search(self, stl_file: str) -> tuple[pv.UnstructuredGrid, float, int]:
+        """
+        Generate the global mesh and adjust edge length until the element
+        count falls within tolerance.
 
-    # Get surface parameters    
-    num_triangles = surface.GetPolygonCount()
-    b = surface.GetBounds()
-    bbox_volume = (b[1]-b[0])*(b[3]-b[2])*(b[5]-b[4])
+        Parameters:
+        ---
+        stl_file (str)   : Path to the global STL surface.
 
-    # Create FE model and add surface
-    doc.CreateFeModel(region)
-    doc.EnableObjectsMode()
-    model = doc.GetModelByName(region)
-    model.AddSurface(surface)
+        Returns:
+        ---
+        tuple[pv.UnstructuredGrid, float, int] : The generated global mesh, the selected edge length, 
+                                                 and the final tetrahedral count.
+        """
+        # Get target element count and tolerance from parameters
+        target_tets = int(self.parameters["target_global_elements"])
+        tolerance = float(self.parameters.get("tolerance", 0.2))
+        max_iters = int(self.parameters.get("mesh_iterations", 50))
 
-    # Set model export type and coarseness
-    doc.EnableModelsMode()
-    model.SetExportType(Model.VtkVolume)
-    model.SetCompoundCoarsenessOnPart(model.GetPartByName(region), coarseness)
+        # Initial edge length and bounds for search
+        edge_length_abs = 2.0
+        min_edge_length_abs = 0.1
+        lower_bound = target_tets * (1.0 - tolerance)
+        upper_bound = target_tets * (1.0 + tolerance)
 
-    # Attempt to generate mesh
-    try:
-        doc.GenerateMesh()
-    except Exception as e:
-        mesh_generated = False
-        doc.RemoveModel(model)
-        doc.RemoveSurface(surface)
+        # Iteratively adjust edge length to find a mesh with element count within bounds
+        for attempt in range(1, max_iters + 1):
+            self.loggers.verbose_log(
+                f"Global meshing iteration {attempt}"
+            )
+            tet = self.generate_mesh(
+                stl_file=stl_file,
+                edge_length_abs=edge_length_abs,
+            )
+            n_tets = self.count_tetrahedra(tet)
+            self.loggers.verbose_log(
+                f"Global mesh tetrahedra={n_tets}"
+            )
 
-        return None, None, mesh_generated
+            # Check if the number of tetrahedra is within the specified bounds
+            if lower_bound <= n_tets <= upper_bound:
+                return tet, edge_length_abs, n_tets
 
-    # If mesh generation succeeded, export VTK volume
-    outpath = os.path.join(outdir, f"{region}.vtk")
-    doc.ExportVtkVolume(outpath, False)
-
-    # Import the exported mesh to query element counts (then remove)
-    doc.ImportVolumeMeshFromFile(outpath, 1.0, False)
-    vm = doc.GetActiveVolumeMesh()
-    num_elements = vm.GetElementCount()
-    
-    # Write results file with target and percentage difference (if available)
-    results_txt_path = os.path.join(outdir, "results.txt")
-    with open(results_txt_path, "a") as f:
-        pct_diff = 100 * (num_elements / target_elements)
-        f.write(f"Subject {subject} Region {region} Coarseness {coarseness}\n")
-        f.write(f"BoundingBoxSize {bbox_volume:.0f}\n")
-        f.write(f"SurfaceElements {num_triangles}\n")
-        f.write(f"VolumeElements {num_elements}\n")
-        f.write(f"TargetElements {target_elements:.0f}\n")
-        f.write(f"PercentDiff {pct_diff:.0f}%\n\n")
-
-    # Clean up model and surface
-    doc.RemoveModel(model)
-    doc.RemoveSurface(surface)
-    doc.RemoveVolumeMesh(vm)
-    mesh_generated = True
-
-    return num_elements, bbox_volume, mesh_generated
-
-# ------------------ PROCESSING --------------------
-def main():
-    for subject in SUBJECTS:
-        subject_outdir = os.path.join(OUTDIR, subject)
-        os.makedirs(subject_outdir, exist_ok=True)
-
-        # Record start of meshing
-        if not os.path.isfile(os.path.join(subject_outdir, "results.txt")):
-            with open(os.path.join(subject_outdir, "results.txt"), "w") as rf:
-                now = datetime.now().strftime("%d-%m-%Y %H:%M")
-                rf.write(f"[ Log | {now} ] Starting meshing\n")
-
-        # -------- FIX WHOLEBRAIN & VENTRICLE SURFACES --------
-        for region in ["wholebrain", "ventricles"]:
-            surface_path = os.path.join(SURFACE_DIR,  subject, "outputs", "surfaces", f"{region}.stl")
-            outdir_region = os.path.join(subject_outdir, region)
-            if not os.path.isfile(os.path.join(outdir_region, f"{region}.stl")):
-                surface_fixed = fix_surface(subject, region, surface_path, outdir_region, rerun=False)
-                if surface_fixed == False:
-                    surface_fixed = fix_surface(subject, region, surface_path, outdir_region, rerun=True)
-                    if surface_fixed == False:
-                        with open(os.path.join(outdir_region, "errors.txt"), "a") as f:
-                            now = datetime.now().strftime("%d-%m-%Y %H:%M")
-                            f.write(f"[ Error | {now} ] Surface fixing for {region} failed after two attempts {subject}\n")
-        
-        # -------------------- GLOBAL MESH --------------------
-        surface_path = os.path.join(SURFACE_DIR,  subject, "outputs", "surfaces", "global.stl")
-        outdir_global = os.path.join(subject_outdir, "global")
-        os.makedirs(os.path.dirname(outdir_global), exist_ok=True)
-        global_vtk_path = os.path.join(outdir_global, "global.vtk")
-        results_path = os.path.join(outdir_global, "results.txt")
-        start_coarse = REGIONS["global"]
-
-        # Global mesh already exists
-        if os.path.isfile(global_vtk_path):
-            # Results.txt missing
-            if not os.path.isfile(results_path):
-                fixed_surface = os.path.join(outdir_global, "global.stl")
-                if os.path.isfile(fixed_surface):
-                    surface_path = fixed_surface
-
-                global_bbox, num_triangles, global_elements = get_parameters(surface_path, global_vtk_path)
-                target_elements = TARGET_GLOBAL_ELEMENTS
-                pct_diff = 100 * (global_elements / target_elements)
-                with open(results_path, "a") as f:
-                    f.write(f"Subject {subject} Region Global\n")
-                    f.write(f"BoundingBoxSize {global_bbox:.0f}\n")
-                    f.write(f"SurfaceElements {num_triangles}\n")
-                    f.write(f"VolumeElements {global_elements}\n")
-                    f.write(f"TargetElements {target_elements:.0f}\n")
-                    f.write(f"PercentDiff {pct_diff:.0f}%\n")
-            # Result.txt present, pull values
+            # Adjust edge length based on whether we have too many or too few elements
+            if n_tets > upper_bound:
+                edge_length_abs += 0.1
             else:
-                with open(results_path, "r") as f:
-                    lines = f.readlines()
-                for line in lines[1:]:
-                    if line.startswith("BoundingBoxSize"):
-                        global_bbox = float(line.split()[1])
-                    if line.startswith("VolumeElements"):
-                        global_elements = float(line.split()[1])
+                edge_length_abs = max(min_edge_length_abs, edge_length_abs - 0.1)
 
-        # Global mesh does not exist
-        else:
-            fixed_surface = os.path.join(outdir_global, "global.stl")
-            if not os.path.isfile(fixed_surface):
-                surface_fixed = fix_surface(subject, "global", surface_path, outdir_global, rerun=False)
-                if surface_fixed == False:
-                    surface_fixed = fix_surface(subject, "global", surface_path, outdir_global, rerun=True)
-                    if surface_fixed == False:
-                        with open(os.path.join(subject_outdir, "errors.txt"), "a") as f:
-                            now = datetime.now().strftime("%d-%m-%Y %H:%M")
-                            f.write(f"[ Error | {now} ] Global surface fixing failed after two attempts {subject}\n")
-            
-            # Skip to next subject if global surface cannot be fixed            
-            if not os.path.isfile(fixed_surface):
-                continue
+        # If we exhaust all attempts without finding a suitable mesh, log an error
+        self.loggers.errors(
+            "Unable to generate a global mesh within tolerance after "
+            f"{max_iters} attempts"
+        )
 
-            # Try multiple coarseness values
-            surface_path = os.path.join(outdir_global, "global.stl")
-            smallest_discrepancy = float("inf")
-            closest_coarseness = start_coarse
-            found_within_tol = False
-            no_global_mesh = False
+    def run_mesh_gen(self):
+        """
+        Run tetrahedral mesh generation.
+        """
+        # Define directories
+        self.interim_dir = os.path.join(self.interim_dir, "mesh_generation")
+        os.makedirs(self.interim_dir, exist_ok=True)
 
-            for coarseness in range(start_coarse, start_coarse + COARSENESS_STEPS):
-                # First meshing attempt
-                num_elements, bbox_volume, ok = generate_mesh(
-                    subject, "global", coarseness, surface_path, outdir_global,
-                    target_elements=TARGET_GLOBAL_ELEMENTS
+        self.mesh_dir = os.path.join(self.output_dir, "meshes")
+        os.makedirs(self.mesh_dir, exist_ok=True)
+
+        # Generate global mesh
+        self.loggers.plugin_log("Generating global mesh")
+        global_surface_fpath = self.resolve_surface_path("global")
+        global_mesh_outpath = os.path.join(self.mesh_dir, "global.vtk")
+        self.global_mesh, selected_edge_length_abs, _ = self.generate_global_mesh_with_search(
+            stl_file=global_surface_fpath,
+        )
+        try:
+            self.global_mesh.save(global_mesh_outpath)
+        except Exception as e:
+            self.loggers.errors(f"Failed to save global mesh to {global_mesh_outpath}: {e}")
+
+        # Generate region meshes
+        if self.parameters["generate_region_meshes"]:
+            self.loggers.plugin_log("Generating region meshes")
+            regions = [
+                region for region in self.regions
+                if region not in ["global", "wholebrain", "ventricles"]
+            ]
+            for region in regions:
+                surface_path = self.resolve_surface_path(region)
+                outpath = os.path.join(self.mesh_dir, f"{region}.vtk")
+                self.loggers.verbose_log(f"Generating mesh file for {region}")
+                self.generate_mesh(
+                    stl_file=surface_path,
+                    outpath=outpath,
+                    edge_length_abs=selected_edge_length_abs,
                 )
+                if not os.path.isfile(outpath):
+                    self.loggers.errors(f"Regional mesh file not produced for {region}")
 
-                # No valid mesh - move onto next coarseness
-                if not ok:
-                    continue
-                else:
-                    # Mesh produced assess element count vs target
-                    discrepancy = abs(num_elements - TARGET_GLOBAL_ELEMENTS)
-                    if discrepancy <= (TARGET_GLOBAL_ELEMENTS * TOLERANCE_FRAC):
-                        # Accept and stop iterating
-                        found_within_tol = True
-                        global_elements = num_elements
-                        global_bbox = float(bbox_volume)
-                        with open(results_path, "a") as f:
-                            now = datetime.now().strftime("%d-%m-%Y %H:%M")
-                            f.write(f"\n[ Log | {now} ] SELECTED MESH COARSENESS: {coarseness} \n")
-                        break
-                    else:
-                        # Not within tolerance - record closest
-                        if discrepancy < smallest_discrepancy:
-                            smallest_discrepancy = discrepancy
-                            closest_coarseness = coarseness
-                            pct_diff = 100 * (num_elements / TARGET_GLOBAL_ELEMENTS)
-                        # Move onto next coarseness
-                        if os.path.exists(outdir_global):
-                            for f in os.listdir(outdir_global):
-                                if f.endswith((".vtk")):
-                                    os.remove(os.path.join(outdir_global, f))
-                        continue
+        if not os.path.isfile(global_mesh_outpath):
+            self.loggers.errors("Global mesh file not produced")
 
-            # If not found within tolerance, use the closest coarseness and generate once more
-            if not found_within_tol:
-                if not smallest_discrepancy == float("inf"):
-                    num_elements, bbox_volume, ok = generate_mesh(
-                        subject, "global", closest_coarseness, surface_path, outdir_global,
-                        target_elements=TARGET_GLOBAL_ELEMENTS
-                    )
-
-                    with open(results_path, "a") as f:
-                        now = datetime.now().strftime("%d-%m-%Y %H:%M")
-                        f.write(f"\n[ Log | {now} ] SELECTED MESH COARSENESS: {closest_coarseness} \n")
-
-                    with open(os.path.join(subject_outdir, "results.txt"), "a") as f:
-                        now = datetime.now().strftime("%d-%m-%Y %H:%M")
-                        if pct_diff > 50:
-                            f.write(f"[ Log | {now} ] Global mesh outside of initial tolerance. Closest "
-                                    f"coarseness {closest_coarseness} acceptable {pct_diff:.0f}% \n")
-                        elif pct_diff < 50:
-                            f.write(f"[ WARNING | {now} ] Global mesh not within tolerance. Closest "
-                                    f"coarseness {closest_coarseness} {pct_diff:.0f}% \n")
-
-                # Global mesh failed
-                if not ok or smallest_discrepancy == float("inf"):
-                    no_global_mesh = True
-                    with open(os.path.join(subject_outdir, "errors.txt"), "a") as f:
-                        now = datetime.now().strftime("%d-%m-%Y %H:%M")
-                        f.write(f"[ Error | {now} ] Global meshing failed for subject {subject}\n")
-                else:
-                    global_elements = num_elements
-                    global_bbox = float(bbox_volume)
-
-            # If no global mesh, skip regions and move onto next subject
-            if no_global_mesh:
+        # Move tracked surface debug output into the mesh interim directory.
+        for fname in ["__tracked_surface.stl", "_tracked_surface.stl"]:
+            src = os.path.abspath(os.path.join(os.getcwd(), fname))
+            if not os.path.isfile(src):
                 continue
 
-
-        # -------------------- REGIONAL MESHES --------------------
-        for region in REGIONS:
-            if region == "global":
+            dst = os.path.abspath(os.path.join(self.interim_dir, fname))
+            if src == dst:
                 continue
-            start_coarse = REGIONS[region]
-            surface_path = os.path.join(SURFACE_DIR, subject, "outputs", "surfaces", f"{region}.stl")
-            outdir_region = os.path.join(subject_outdir, region)
-            os.makedirs(os.path.dirname(outdir_region), exist_ok=True)
-            region_vtk_path = os.path.join(outdir_region, f"{region}.vtk")
-            results_path = os.path.join(outdir_region, "results.txt")
 
-            # Regional mesh already exists
-            if os.path.isfile(region_vtk_path):
-                # Results.txt missing
-                if not os.path.isfile(results_path):
-                    fixed_surface = os.path.join(outdir_region, f"{region}.stl")
-                    if os.path.isfile(fixed_surface):
-                        surface_path = fixed_surface
-                    bbox_volume, num_triangles, num_elements = get_parameters(surface_path, region_vtk_path)
-                    target_elements = ((bbox_volume / global_bbox) * global_elements) * 0.5
-                    pct_diff = 100 * (num_elements / target_elements)
-                    with open(results_path, "a") as f:
-                        f.write(f"Subject {subject} Region {region}\n")
-                        f.write(f"BoundingBoxSize {bbox_volume:.0f}\n")
-                        f.write(f"SurfaceElements {num_triangles}\n")
-                        f.write(f"VolumeElements {num_elements}\n")
-                        f.write(f"TargetElements {target_elements:.0f}\n")
-                        f.write(f"PercentDiff {pct_diff:.0f}%\n")
-                # Result.txt present, continue to next region
-                else:
-                    continue
-
-            # Regional mesh does not exist
-            else:
-                fixed_surface = os.path.join(outdir_region, f"{region}.stl")
-                if not os.path.isfile(fixed_surface):
-                    surface_fixed = fix_surface(subject, region, surface_path, outdir_region, rerun=False)
-                    if surface_fixed == False:
-                        surface_fixed = fix_surface(subject, region, surface_path, outdir_region, rerun=True)
-                        if surface_fixed == False:
-                            with open(os.path.join(outdir_region, "errors.txt"), "a") as f:
-                                now = datetime.now().strftime("%d-%m-%Y %H:%M")
-                                f.write(f"[ Error | {now} ] Surface fixing failed after two attempts {subject} {region}\n")
-                            # Surface fixing unsuccessful, skipping to next region
-                            continue
-
-                surface_path = os.path.join(outdir_region, f"{region}.stl")
-
-                bbox_volume, num_triangles = get_parameters(surface_path)
-                target_elements = ((bbox_volume / global_bbox) * global_elements) * 0.5
-
-                smallest_discrepancy = float("inf")
-                closest_coarseness = start_coarse
-                found_within_tol = False
-                no_region_mesh = False
-
-                for coarseness in range(start_coarse, start_coarse + COARSENESS_STEPS):
-                    # Try to mesh
-                    num_elements, bbox_volume, ok = generate_mesh(
-                        subject, region, coarseness, surface_path, outdir_region,
-                        target_elements=target_elements
-                    )
-
-                    # No valid mesh - move onto next coarseness
-                    if not ok:
-                        continue
-
-                    # Mesh produced assess element count vs target
-                    discrepancy = abs(num_elements - target_elements)
-                    if discrepancy <= (target_elements * TOLERANCE_FRAC):
-                        # Accept and stop iterating
-                        found_within_tol = True
-                        with open(results_path, "a") as f:
-                            now = datetime.now().strftime("%d-%m-%Y %H:%M")
-                            f.write(f"\n[ Log | {now} ] SELECTED MESH COARSENESS: {coarseness} \n")
-                        break
-                    else:
-                        # Not within tolerance - record closest
-                        if discrepancy < smallest_discrepancy:
-                            smallest_discrepancy = discrepancy
-                            closest_coarseness = coarseness
-                            pct_diff = 100 * (num_elements / target_elements)
-                        # Move onto next coarseness
-                        if os.path.exists(outdir_region):
-                            for f in os.listdir(outdir_region):
-                                if f.endswith((".vtk")):
-                                    os.remove(os.path.join(outdir_region, f))
-                        continue
-
-                # If not found within tolerance, use the closest coarseness and generate once more
-                if not found_within_tol:
-                    if not smallest_discrepancy == float("inf"):
-                        num_elements, bbox_volume, ok = generate_mesh(
-                            subject, region, closest_coarseness, surface_path, outdir_region,
-                            target_elements=target_elements
-                        )
-
-                        with open(results_path, "a") as f:
-                            now = datetime.now().strftime("%d-%m-%Y %H:%M")
-                            f.write(f"\n[ Log | {now} ] SELECTED MESH COARSENESS: {closest_coarseness} \n")
-
-                        with open(os.path.join(subject_outdir, "results.txt"), "a") as f:
-                            now = datetime.now().strftime("%d-%m-%Y %H:%M")
-                            if pct_diff > 50:
-                                f.write(f"[ Log | {now} ] {region} mesh outside of initial tolerance. Closest "
-                                        f"coarseness {closest_coarseness} acceptable {pct_diff:.0f}% \n")
-                            elif pct_diff < 50:
-                                f.write(f"[ WARNING | {now} ] {region} mesh not within tolerance. Closest "
-                                        f"coarseness {closest_coarseness} {pct_diff:.0f}% \n")
-
-                    # Region mesh failed
-                    if not ok or smallest_discrepancy == float("inf"):
-                        with open(os.path.join(subject_outdir, "errors.txt"), "a") as f:
-                            now = datetime.now().strftime("%d-%m-%Y %H:%M")
-                            f.write(f"[ Error | {now} ] Region meshing failed for subject {subject} {region}\n")
-                        continue
-
-        # -------------------- FINAL SUBJECT CHECK --------------------
-        subject_success = True
-        for region in REGIONS:
-            vtk_file = os.path.join(subject_outdir, region, f"{region}.vtk")
-            if not os.path.isfile(vtk_file):
-                subject_success = False
-                # append error lines
-                with open(os.path.join(subject_outdir, "errors.txt"), "a" if os.path.exists(os.path.join(subject_outdir, "errors.txt")) else "w") as ef:
-                    now = datetime.now().strftime("%d-%m-%Y %H:%M")
-                    ef.write(f"[ Error | {now} ] No mesh produced for {subject} {region}\n")
-
-        if subject_success:
-            results_path = os.path.join(subject_outdir, "results.txt")
-            log_line = "All meshes produced successfully"
-        
-            already_logged = False
-            if os.path.exists(results_path):
-                with open(results_path, "r") as rf:
-                    already_logged = log_line in rf.read()
-        
-            if not already_logged:
-                with open(results_path, "a") as rf:
-                    now = datetime.now().strftime("%d-%m-%Y %H:%M")
-                    rf.write(f"[ Log | {now} ] {log_line}\n")
-
-if __name__ == "__main__":
-    main()
+            try:
+                shutil.copy2(src, dst)
+                os.remove(src)
+            except Exception as e:
+                self.loggers.errors(f"Failed to move {fname} to {self.interim_dir}: {e}")

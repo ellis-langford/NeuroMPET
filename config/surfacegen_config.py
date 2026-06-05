@@ -8,12 +8,7 @@ PARAMETERS = {
     "segmentations": {
         "type": str,
         "default": "",
-        "help": "Path to directory containing all segmentation files or" +
-                "list of comma seperated paths to segmentation files"
-    },
-    "generate_global": {
-        "type": bool,
-        "default": True,
-        "help": "If True, a global mesh will be created by subtracting ventricles from wholebrain (default: True)"
+        "help": "Path to a directory containing all segmentation files or "
+                + "a list of comma-separated paths to segmentation files"
     }
 }

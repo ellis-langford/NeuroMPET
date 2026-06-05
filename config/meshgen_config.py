@@ -8,8 +8,8 @@ PARAMETERS = {
     "surfaces": {
         "type": str,
         "default": "",
-        "help": "Path to directory containing all surface files or" +
-                "list of comma seperated paths to surface files"
+        "help": "Path to a directory containing all surface files or "
+                + "a list of comma-separated paths to surface files"
     },
     "target_global_elements": {
         "type": int,
@@ -21,9 +21,14 @@ PARAMETERS = {
         "default": 0.2,
         "help": "Tolerance for discrepancy between target elements and actual elements in mesh (default: 0.2)"
     },
-    "coarseness_steps": {
+    "mesh_iterations": {
         "type": int,
-        "default": 10,
-        "help": "Number of coarseness values to attempt during meshing (default: 10)"
+        "default": 50,
+        "help": "Maximum number of absolute edge-length values to attempt during meshing (default: 50)"
+    },
+    "generate_region_meshes": {
+        "type": bool,
+        "default": False,
+        "help": "If True, generate regional meshes in addition to the global mesh (default: False)"
     }
 }

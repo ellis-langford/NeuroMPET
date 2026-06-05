@@ -5,27 +5,26 @@ PARAMETERS = {
         "default": "",
         "help": "Path to optional properties file containing additional parameters"
     },
-    "meshes": {
+    "mesh": {
         "type": str,
         "default": "",
-        "help": "Path to directory containing all mesh files or" +
-                "list of comma seperated paths to mesh files"
+        "help": "Path to global mesh file"
     },
     "surfaces": {
         "type": str,
         "default": "",
-        "help": "Path to directory containing all surface files or" +
-                "list of comma seperated paths to surface files"
+        "help": "Path to a directory containing all surface files or "
+                + "a list of comma-separated paths to surface files"
     },
     "bc_file": {
         "type": str,
         "default": "",
         "help": "Path to boundary conditions (.csv) file"
     },
-    "labels_file": {
+    "solver_labels_file": {
         "type": str,
         "default": "",
-        "help": "Path to ROI label file (required if --run_meshing is False)"
+        "help": "Path to solver ROI label file (required if --run_mesh_mapping is False)"
     },
     "timestep_size": {
         "type": float,
@@ -35,14 +34,14 @@ PARAMETERS = {
     "waveform_timesteps": {
         "type": int,
         "default": 10,
-        "help": "Number of time steps per boundary condition waveform (default: 10)." +
-                "e.g. Waveform length = waveform_timesteps * timestep_size"
+        "help": "Number of time steps per boundary condition waveform (default: 10). "
+                + "e.g. Waveform length = waveform_timesteps * timestep_size"
     },
     "num_waveforms": {
         "type": int,
         "default": 50,
-        "help": "Number of total boundary condition waveforms to use to ensure steady-state reached (default: 50)." +
-                "e.g. Total timesteps = waveform_timesteps * num_waveforms "
+        "help": "Number of total boundary condition waveforms to use to ensure steady-state reached (default: 50). "
+                + "e.g. Total timesteps = waveform_timesteps * num_waveforms"
     },
     "output_timestep_interval": {
         "type": int,

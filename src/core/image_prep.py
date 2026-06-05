@@ -5,14 +5,18 @@ import shutil
 import nibabel as nib
 import numpy as np
 import ants
-from scipy.signal import find_peaks
 
 class ImagePrep(object):
     """Class setup"""
     def __init__(self, plugin_obj):
-        # Check all expected attributed are present
-        to_inherit = ["loggers", "parameters", "base_dir", 
-                      "input_dir", "interim_dir", "output_dir"]
+        # Check all expected attributes are present
+        to_inherit = [
+            "loggers",
+            "parameters",
+            "input_dir",
+            "interim_dir",
+            "output_dir",
+        ]
         for attr in to_inherit:
             try:
                 setattr(self, attr, getattr(plugin_obj, attr))
@@ -20,27 +24,28 @@ class ImagePrep(object):
                 print(f"Attribute Error - {e}")
                 sys.exit(1)
 
-    def reset_origin(self, input_im, output_im):
+    def reset_origin(self, input_im: str, output_im: str):
         """
-        Reset the origin of the image to the centre of the brain
+        Reset the image origin to the approximate centre of the brain.
 
         Parameters:
         ---
-        input_im (str)        : Path to input image to be reset
-        output_im (str)       : Path to save origin reset image to
+        input_im (str)      : Path to the input image to be reset.
+        output_im (str)     : Path to save the origin-reset image.
         """
         # Load image
         nii = nib.load(input_im)
         data = nii.get_fdata()
         affine = nii.affine.copy()
+        self.loggers.verbose_log("Resetting image origin")
         
         # Reset origin
         affine[0:3, 3] = 0
         
-        # Centering based on image shape
-        center_shift = np.identity(4)
-        center_shift[0:3, 3] = -np.array(data.shape) / 2.0
-        aff_out = affine @ center_shift
+        # Centring based on image shape
+        centre_shift = np.identity(4)
+        centre_shift[0:3, 3] = -np.array(data.shape) / 2.0
+        aff_out = affine @ centre_shift
 
         # Save image
         os.makedirs(os.path.dirname(output_im), exist_ok=True)
@@ -48,22 +53,23 @@ class ImagePrep(object):
 
         # Check required outputs have been produced
         if not os.path.exists(output_im):
-            self.loggers.errors(f"Origin reset image has not been produced")
+            self.loggers.errors("Origin reset image has not been produced")
         else:
             self.input_im = output_im
 
-    def n4_bias_correct(self, input_im, output_im, mask=None):
+    def n4_bias_correct(self, input_im: str, output_im: str, mask: object = None):
         """
-        Perform N4 bias field correction using ANTsPy.
+        Perform N4 bias field correction.
     
         Parameters:
         ---
-        input_im (str)                  : Path to the input NIfTI image.
-        output_im (str)                 : Path to save the bias-corrected image.
-        mask (ants.ANTsImage, optional) : Optional binary mask to constrain correction.
+        input_im (str)      : Path to the input NIfTI image.
+        output_im (str)     : Path to save the bias-corrected image.
+        mask (object)       : Optional binary mask to constrain correction.
         """
         # Load the image
         img = ants.image_read(input_im)
+        self.loggers.verbose_log("Running N4 bias correction")
     
         # If no mask is provided, create one automatically
         if mask is None:
@@ -82,52 +88,34 @@ class ImagePrep(object):
         ants.image_write(corrected, output_im)
 
         # Check required outputs have been produced
-        result_file = os.path.join(output_im)
-        if not os.path.exists(result_file):
-            self.loggers.errors(f"N4 bias corrected image has not been produced")
+        if not os.path.exists(output_im):
+            self.loggers.errors("N4 bias corrected image has not been produced")
         else:
             self.input_im = output_im
 
-    def normalise_intensities(self, input_im, output_im, rescale_max=1000):
+    def normalise_intensities(self, input_im: str, output_im: str):
         """
-        Normalises image intensity so that the white matter peak maps to rescale_max.
+        Normalise image intensities to a fixed maximum value.
         
         Parameters:
         ---
-        input_im (str)    : Path to input image
-        output_im (str)   : Path to save intensity-normalized image
-        rescale_max (int) : Desired intensity value of white matter peak (default 1000)
+        input_im (str)      : Path to the input image.
+        output_im (str)     : Path to save the intensity normalised image.
         """
-        scale_wm_peak = self.parameters["wm_peak_scaling"]
         # Load image
         nii = nib.load(input_im)
         data = nii.get_fdata()
         affine = nii.affine.copy()
-    
-        if scale_wm_peak:
-            # Mask non-zero voxels (eps to account for non-zero background due to n4 correction)
-            eps = 1e-3
-            brain_voxels = data[data > eps]
-            
-            # Estimate white matter peak
-            hist, bin_edges = np.histogram(brain_voxels, bins=1000, range=(np.min(brain_voxels), np.max(brain_voxels)))
-            peaks, _ = find_peaks(hist)
-    
-            if len(peaks) == 0:
-                self.loggers.errors("Could not find intensity peaks in histogram")
-                return
-    
-            # Assume white matter peak is the highest peak
-            wm_peak_index = peaks[np.argmax(hist[peaks])]
-            wm_peak_intensity = bin_edges[wm_peak_index]
-    
-            # Scale image so that wm_peak_intensity → rescale_max
-            scale_factor = rescale_max / wm_peak_intensity
+        rescale_max = self.parameters["rescale_max"]
+        self.loggers.verbose_log("Normalising image intensities")
 
-        else:
-            max_intensity = np.max(data)
-            scale_factor = rescale_max / max_intensity
-            
+        # Check for zero max intensity to avoid division by zero
+        if np.max(data) == 0:
+            self.loggers.errors("Cannot normalise intensities for an image with maximum intensity 0")
+            return
+
+        # Rescale intensities to specified maximum value
+        scale_factor = rescale_max / np.max(data)
         norm_data = data * scale_factor
     
         # Clean up header
@@ -141,16 +129,17 @@ class ImagePrep(object):
         nib.Nifti1Image(norm_data.astype(np.float32), affine, new_header).to_filename(str(output_im))
     
         # Check output
-        result_file = os.path.join(output_im)
-        if not os.path.exists(result_file):
-            self.loggers.errors(f"White matter peak normalised image has not been produced")
+        if not os.path.exists(output_im):
+            self.loggers.errors("Intensity normalised image has not been produced")
         else:
             self.input_im = output_im
 
     def run_preprocessing(self):
         """
-        Run image preprocessing
+        Run the enabled preprocessing steps on the input image.
         """
+        self.loggers.plugin_log("Preprocessing input image")
+
         # Define input image
         self.input_im = os.path.join(self.input_dir, "image.nii.gz")
         self.interim_dir = os.path.join(self.interim_dir, "preprocessing")
@@ -158,21 +147,18 @@ class ImagePrep(object):
         
         # Reset image origin
         if self.parameters["reset_origin"]:
-            self.loggers.plugin_log("Resetting image origin")
             interim_outpath = os.path.join(self.interim_dir, "origin_reset", os.path.basename(self.input_im))
             self.reset_origin(self.input_im, interim_outpath)
 
-        # N4 Bias Correction
+        # N4 bias correction
         if self.parameters["n4_bias_correct"]:
-            self.loggers.plugin_log("Applying N4 Bias Correction")
             interim_outpath = os.path.join(self.interim_dir, "N4_corrected", os.path.basename(self.input_im))
             self.n4_bias_correct(self.input_im, interim_outpath)
 
         # Normalise image intensities
         if self.parameters["normalise_intensities"]:
-            self.loggers.plugin_log("Normalising image intensity ranges")
             interim_outpath = os.path.join(self.interim_dir, "intensity_normed", os.path.basename(self.input_im))
-            self.normalise_intensities(self.input_im, interim_outpath, self.parameters["rescale_max"])
+            self.normalise_intensities(self.input_im, interim_outpath)
         
-        # Copy final image to output directory
-        shutil.copy(self.input_im, os.path.join(self.output_dir, "preprocessed_im.nii.gz"))         
+        # Copy the latest preprocessed image to the output directory
+        shutil.copy(self.input_im, os.path.join(self.output_dir, "image.nii.gz"))

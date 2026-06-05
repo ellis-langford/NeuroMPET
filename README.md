@@ -13,14 +13,25 @@
 
 ## Introduction
 
-NeuroMPET is a processing workflow that: preprocesses, registers, segments a NIfTI image; then generates meshes, maps tissue classes onto the mesh and models using the MPET solver.
+NeuroMPET is an image-to-model pipeline for subject-specific modelling of cerebral fluid dynamics in the brain.
 
-The core solver code was developed by Liwei Guo (liwei.guo@ucl.ac.uk) and Yiannis Ventikos (y.ventikos@ucl.ac.uk) at University College London. The core solver code is not published in this GitHub repository, to request access to the MPET solver core code please contact Ellis Langford (ellis.langford.19@ucl.ac.uk).
+The pipeline consists of the following stages:
+- Preprocessing
+- Registration
+- Cortical Segmentation
+- Ventricular Segmentation
+- Surface Generation
+- Mesh Generation
+- Mesh Mapping
+- Modelling
+- Results Processing
+
+The core solver code was developed by Liwei Guo (liwei.guo@ucl.ac.uk) and Yiannis Ventikos (y.ventikos@ucl.ac.uk) at University College London. The core solver code is not published in this GitHub repository. To request access to the MPET solver core code, please contact Ellis Langford (ellis.langford.19@ucl.ac.uk).
 
 
 ## Requirements
 
-To successfully run the NeuroMPET pipeline, please ensure the following requirements are met:
+To run the NeuroMPET pipeline successfully, please ensure the following requirements are met:
 
 **Ubuntu 22.04 + Docker 27.3.1 + Python 3.10**<br>
 *(other versions may be compatible but have not been tested)*
@@ -33,7 +44,7 @@ To install the necessary components for NeuroMPET, please follow the steps below
 ► Either, pull the docker image from GitHub container registry:
 
   ```bash
-  docker pull ghcr.io/ellis-langford/neuro_mpet:v1
+  docker pull ghcr.io/ellis-langford/neuro_mpet:v2
   ```
 
 ► Or clone the code from the GitHub repo and build image yourself:
@@ -41,16 +52,16 @@ To install the necessary components for NeuroMPET, please follow the steps below
   ```bash
   git clone https://github.com/ellis-langford/NeuroMPET.git
   cd NeuroMPET
-  docker build -t ghcr.io/ellis-langford/neuro_mpet:v1 .
+  docker build -t ghcr.io/ellis-langford/neuro_mpet:v2 .
   ```
   
-► Lauch a docker container from the NeuroMPET docker image:
+► Launch a docker container from the NeuroMPET docker image:
   
   ```bash
-  docker run -it -v /path/to/data:/path/to/data ghcr.io/ellis-langford/neuro_mpet:v1 bash
+  docker run -it -v /path/to/data:/path/to/data ghcr.io/ellis-langford/neuro_mpet:v2 bash
   ```
 
-► Edit the example properties file to suit your requirements
+► Edit the example properties file to suit your requirements:
   
   ```bash
   nano example_properties_file.json
@@ -65,7 +76,7 @@ To install the necessary components for NeuroMPET, please follow the steps below
 ► Run the pipeline:
   
   ```bash
-  python3.10 /app/src/main.py --input_im /path/to/input/dir --props_fpath /path/to/properties/file
+  python3.10 /app/src/main.py --input_im /path/to/input_image.nii.gz --props_fpath /path/to/properties_file.json
   ```
 
 ## Pipeline Modules & Options
@@ -73,13 +84,11 @@ To install the necessary components for NeuroMPET, please follow the steps below
 ► image_prep.py<br>
 ► Executed with the *--run_preprocessing* flag<br>
 ► Inputs:<br>
-   > *--input_im*: an NIfTI image<br>
+   > *--input_im*: path to input NIfTI image<br>
 
 ► Optional Parameters:
-   > *--modality*: modality of image to be analysed (default: t1)<br>
    > *--reset_origin*: reset image origin (default: True)<br>
    > *--normalise_intensities*: normalise image intensities (default: true)<br>
-   > *--wm_peak_scaling*: scale intensities using WM peak, else linear scaling (default: false)<br>
    > *--rescale_max*: maximum value to use in rescaling (default: 1000)<br>
    > *--n4_bias_correct*: perform N4 bias correction (default: true)<br>
 
@@ -88,7 +97,7 @@ To install the necessary components for NeuroMPET, please follow the steps below
 ► registration.py<br>
 ► Executed with the *--run_registration* flag<br>
 ► Inputs:<br>
-   > *--input_im*: an NIfTI image,<br>
+   > *--input_im*: path to input NIfTI image<br>
    > *--input_atlas* (optional): atlas to register input image to (default: MNI atlas)<br>
 
 ► Other Parameters:<br>
@@ -96,78 +105,79 @@ To install the necessary components for NeuroMPET, please follow the steps below
 
 ***
 `Cortical Segmentation`<br>
-► cortical_segmentation.py<br>
+► cortical_seg.py<br>
 ► Executed with the *--run_cortical_segmentation* flag<br>
 ► Inputs:<br>
-   > *--input_im*: an NIfTI image, or<br>
-   > *--freesurfer_outputs*: a folder of FreeSurfer outputs<br>
+   > *--input_im*: path to input NIfTI image<br>
 
 ► Other Parameters:<br>
-   > *--segmentation_mode*: method of segmentation, FreeSurfer/SynthSeg (default: SynthSeg)<br>
-   > *--subject_id*: subjectID of data, used in logging only<br>
-   > *--use_gpu*: run SynthSeg mode using GPU (default: False)<br>
-   > *--big_vents*: add flag to FreeSurfer command to aid in processing of subjects with large ventricles (default: false)<br>
-   > *--large_FOV*: add flag to FreeSurfer command to aid in processing of subjects with large FOV (default: false)<br>
+   > *--use_gpu*: run SynthSeg using GPU (default: False)<br>
 
 ***
 `Ventricular Segmentation`<br>
-► Manual with ITK-SNAP<br>
-► Currently, the output segmentations for the ventricles from FreeSurfer are disjointed and require manual fixing<br>
-► Future work will implement improved ventricular segmentation to remove this step<br>
+► Manual refinement of SynthSeg mask with ITK-SNAP<br>
+► Currently, the ventricle segmentations produced by SynthSeg are disjointed and require manual fixing<br>
+► Future work will implement improved ventricular segmentation to remove this manual step<br>
 
 ***
 `Surface Generation`<br>
 ► surface_generation.py<br>
 ► Executed with the *--run_surface_generation* flag<br>
 ► Inputs:<br>
-   > *--segmentations*: a folder or comma seperated list of NIfTI binary segmentation files<br>
-
-► Other Parameters:<br>
-   > *--generate_global*: generate a global surface by subtracting the ventricles from wholebrain (default: true)<br>
+   > *--segmentations*: a folder or comma-separated list of NIfTI binary segmentation files<br>
 
 ***
 `Mesh Generation`<br>
 ► mesh_generation.py<br>
-► Currently the script cannot be executed in Simpleware via the command line<br>
-► Future work will implement automated processing of the script to remove the need to run in the Simpleware GUI.<br>
+► Executed with the *--run_mesh_generation* flag<br>
 ► Inputs:<br>
-   > *--surfaces*: a folder or comma seperated list of .stl surface files<br>
+   > *--surfaces*: a folder or comma-separated list of .stl surface files<br>
 
 ► Other Parameters:<br>
-   > *--starting_coarseness*: dictionary of mesh coarseness values to start iterations from<br>
-   > *--coarseness_steps*: number of coarsness values to try when generating mesh (default: 15)<br>
-   > *--target_global_elements*: target element count for global mesh (default: 2_500_000)<br>
+   > *--target_global_elements*: target tetrahedral element count for the global mesh (default: 2_500_000)<br>
    > *--tolerance*: tolerance fraction for actual elements vs target elements (default: 0.2)<br>
+   > *--mesh_iterations*: maximum number of iterations to attempt during meshing (default: 50)<br>
+   > *--generate_region_meshes*: generate regional meshes in addition to the global mesh (default: false)<br>
 
 ***
 `Mesh Mapping`<br>
 ► mesh_map.py<br>
 ► Executed with the *--run_mesh_mapping* flag<br>
 ► Inputs:<br>
-   > *--meshes*: a folder or comma seperated list of .vtk format mesh files,<br>
-   > *--dwi_dir* (optional): a folder containing DWI input images,<br>
-   > *--cbf_dir* (optional): a folder containing CBF input images<br>
-
-► Other Parameters:<br>
-   > *--adjust_labels_dwi*: adjust mesh labels based on DWI inputs supplied with --dwi_dir (default: false)<br>
-   > *--generate_cbf_map*: generate an CBF scalar map from a CBF NIfti image supplied with --cbf_dir (default: false)<br>
-   > *--generate_fa_map*: generate an FA scalar map from a FA NIfti image supplied with --dwi_dir (default: false)<br>
+   > *--mesh*: path to a global .vtk mesh file<br>
+   > *--surfaces*: a folder or comma-separated list of .stl surface files<br>
 
 ***
 `MPET Solver`<br>
 ► solver.py<br>
 ► Executed with the *--run_modelling* flag<br>
 ► Inputs:<br>
-   > *--meshes*: a folder or comma seperated list containing a global.vtk format mesh file, and<br>
-   > *--surfaces*: a folder or comma seperated list containing a wholebrain.stl and ventricles.stl file to be used in creation of .bit file,<br>
-   > *--labels_file*: path to an ROI labels .txt file,<br>
-   > *--bc_file* (optional): path to a boundary condition .csv file (default: general healthy control BC file)<br>
+   > *--mesh*: path to a global .vtk mesh file<br>
+   > *--surfaces*: a folder or comma-separated list containing a wholebrain.stl and ventricles.stl file to be used in creation of .bit file<br>
+   > *--solver_labels_file*: path to a solver ROI label .txt file<br>
+   > *--bc_file* (optional): path to a boundary condition .csv file<br>
 
 ► Other Parameters:<br>
    > *--timestep_size*: size of timestep (default: 0.1)<br>
    > *--waveform_timesteps*: number of time steps per boundary condition waveform (default: 10)<br>
    > *--num_waveforms*: number of total boundary condition waveforms to use to ensure steady-state reached (default: 50)<br>
    > *--output_timestep_interval*: interval between two VTU output files (default: 100)<br>
+
+***
+`Results Processing`<br>
+► results_processing.py<br>
+► Executed with the *--run_results_processing* flag<br>
+► Inputs:<br>
+   > *--modelling_outputs*: a folder containing modelling .vtu output files<br>
+   > *--input_im*: input image in the same space as the global mask<br>
+   > *--global_mask*: path to a global binary mask<br>
+   > *--labels_file*: path to a detailed ROI region-label .txt file used for region-wise results processing<br>
+
+► Other Parameters:<br>
+   > *--results_timestep*: solver timestep to use for results processing (default: 500)<br>
+   > *--volume_weighted_results*: compute regional results using tetrahedral volume weighting (default: true)<br>
+   > *--register_to_mni*: register the final image and result NIfTI files to the MNI atlas (default: false)<br>
+   > *--results_max_dist_mm*: maximum voxel-to-mesh distance to use in generation of NIfTI maps (default: 3.0)<br>
 
 
 ## Output Structure
@@ -177,35 +187,24 @@ The output directory structure is as follows:
 ```
 Output directory
 ├── inputs
-│   ├── image.nii.gz
-│   └── atlas.nii.gz
 ├── interim_outputs
 │   ├── preprocessing
-│   │   ├── origin_reset
-│   │   ├── intensity_normed
-│   │   └── N4_corrected
 │   ├── registration
 │   ├── segmentation
-│   │   └── {region}
 │   ├── surface_generation
-│   │   └── surfaces
 │   ├── mesh_generation
-│   │   └── meshes
-│   └── mesh_mapping
-│       ├── global_mesh_info
-│       ├── regional_mesh_info
-│       ├── regional_labels
-│       └── regional_labels.txt
+│   ├── mesh_mapping
+│   └── modelling
 ├── outputs
-│   ├── preprocessed_im.nii.gz
-│   ├── registered_im.nii.gz
+│   ├── image.nii.gz
 │   ├── segmentations
 │   ├── surfaces
 │   ├── meshes
-│   ├── labels.txt
-│   ├── CBF_map.txt
-│   ├── FA_map.txt
-│   └── modelling
+│   ├── labels
+│   ├── modelling
+│   ├── results.csv
+│   ├── summary.csv
+│   └── results_plots
 ├── logs
 ├── results.txt
 └── errors.txt
@@ -214,7 +213,7 @@ Output directory
 ► `inputs:` contains a copy of the input images<br>
 ► `interim_outputs`: contains copies of files with various stages of processing applied<br>
 ► `logs:` contains a plugin log (log.txt) and a record of the inputs and parameters (options.txt)<br>
-► `outputs:` contains the final output files<br>
+► `outputs:` contains the final output files, including meshes, labels, results tables and NIfTI result plots<br>
 ► `results.txt:` only produced if the pipeline executes successfully<br>
 ► `errors.txt:` only produced if the pipeline fails to execute successfully (contains error info)<br>
 

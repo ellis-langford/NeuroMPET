@@ -13,3 +13,5 @@ trimesh==4.9.0
 networkx==3.4.2
 pyvista==0.46.4
 scikit-image==0.25.2
+antspyx==0.6.1
+pytetwild==0.2.3

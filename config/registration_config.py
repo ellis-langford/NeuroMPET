@@ -5,11 +5,6 @@ PARAMETERS = {
         "default": "",
         "help": "Path to optional properties file containing additional parameters"
     },
-    "input_im": {
-        "type": str,
-        "default": "",
-        "help": "Path to the input image to be registered"
-    },
     "input_atlas": {
         "type": str,
         "default": "/app/assets/mni_icbm152_atlas_t1.nii.gz",
@@ -17,7 +12,7 @@ PARAMETERS = {
     },
     "reg_type": {
         "type": str,
-        "default": "Rigid",
-        "help": "Registration type to use - options: Affine/Rigid/SyN (default: Rigid)"
+        "default": "Affine",
+        "help": "Registration type to use - options: Affine/Rigid/SyN (default: Affine)"
     },
 }

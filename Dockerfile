@@ -76,6 +76,31 @@ ENV FREESURFER_HOME=/usr/local/freesurfer/8.1.0
 RUN printf "\n# Freesurfer\nsource $FREESURFER_HOME/SetUpFreeSurfer.sh\n" >> /root/.bashrc
 COPY ./assets/fs_license.txt $FREESURFER_HOME/license.txt
 
+# Set Up NextBrain
+RUN mkdir -p /usr/local/freesurfer/8.1.0/python/packages/ERC_bayesian_segmentation \
+    && cd /usr/local/freesurfer/8.1.0/python/packages/ERC_bayesian_segmentation \
+    && for i in 1 2 3 4 5; do \
+         wget --tries=10 --timeout=20 \
+           https://ftp.nmr.mgh.harvard.edu/pub/dist/lcnpublic/dist/Histo_Atlas_Iglesias_2023/atlas_simplified.zip \
+           && break; \
+         echo "Download failed, retrying ($i/5)..."; \
+         sleep 5; \
+       done \
+    && unzip -q atlas_simplified.zip \
+    && rm -f atlas_simplified.zip \
+    && for i in 1 2 3 4 5; do \
+         wget --tries=10 --timeout=20 \
+           -O freesurfer-19a480722122ae7af4e7dec681772faa2c3417dd.zip \
+           https://github.com/freesurfer/freesurfer/archive/19a480722122ae7af4e7dec681772faa2c3417dd.zip \
+           && break; \
+         echo "Download failed, retrying ($i/5)..."; \
+         sleep 5; \
+       done \
+    && unzip -q freesurfer-19a480722122ae7af4e7dec681772faa2c3417dd.zip \
+    && cp -a freesurfer-19a480722122ae7af4e7dec681772faa2c3417dd/mri_histo_util/ERC_bayesian_segmentation/. \
+         /usr/local/freesurfer/8.1.0/python/packages/ERC_bayesian_segmentation/ \
+    && rm -rf freesurfer-19a480722122ae7af4e7dec681772faa2c3417dd freesurfer-19a480722122ae7af4e7dec681772faa2c3417dd.zip
+
 # Download and install PETSc
 WORKDIR /opt
 RUN git clone -b release https://gitlab.com/petsc/petsc.git petsc

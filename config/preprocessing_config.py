@@ -5,16 +5,6 @@ PARAMETERS = {
         "default": "",
         "help": "Path to optional properties file containing additional parameters"
     },
-    "input_im": {
-        "type": str,
-        "default": "",
-        "help": "Path to the input image to be processed"
-    },
-    "modality": {
-        "type": str,
-        "default": "t1",
-        "help": "Modality of the input image. Options: t1, t2, flair, bold, fa (default: t1)"
-    },
     "reset_origin": {
         "type": bool,
         "default": True,
@@ -25,15 +15,10 @@ PARAMETERS = {
         "default": True,
         "help": "If True, image intensities are normalised (default: True)"
     },
-    "wm_peak_scaling": {
-        "type": bool,
-        "default": False,
-        "help": "If True, image intensities are scaled according to the white matter peak, else to a defined range (default: False)"
-    },
     "rescale_max": {
         "type": int,
         "default": 1000,
-        "help": "Desired intensity of white matter peak when rescaling intensity (default: 1000)"
+        "help": "Desired maximum intensity value when rescaling image intensities (default: 1000)"
     },
     "n4_bias_correct": {
         "type": bool,

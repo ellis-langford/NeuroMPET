@@ -1,19 +1,28 @@
 # Imports
 import os
 import sys
-import glob
 import shutil
 import subprocess
 import nibabel as nib
 import numpy as np
 import ants
 
-class FreeSurfer(object):
+
+class CorticalSeg(object):
     """Class setup"""
     def __init__(self, plugin_obj):
-        # Check all expected attributed are present
-        to_inherit = ["loggers", "parameters", "base_dir", "freesurfer_env",
-                      "input_dir", "interim_dir", "output_dir", "log_dir", "tmp_dir"]
+        # Check all expected attributes are present
+        to_inherit = [
+            "loggers",
+            "parameters",
+            "input_dir",
+            "interim_dir",
+            "output_dir",
+            "log_dir",
+            "regions",
+            "region_definitions",
+            "synthseg_env",
+        ]
         for attr in to_inherit:
             try:
                 setattr(self, attr, getattr(plugin_obj, attr))
@@ -21,331 +30,407 @@ class FreeSurfer(object):
                 print(f"Attribute Error - {e}")
                 sys.exit(1)
 
-    def build_freesurfer_command(self):
+    def resolve_segmentation_regions(self):
         """
-        Build freesurfer command.
+        Resolve the segmentation masks required for the requested regions.
+
+        Returns:
+        ---
+        segmentation_regions (list)   : Segmentation regions that must be binarised.
+        split_brainstem (bool)        : True if lateralised brainstem masks are required.
         """
-        # Define command
-        self.subject_id = self.parameters["subject_id"]
-        self.use_gpu = 1 if self.parameters["use_gpu"] else 0
+        segmentation_regions = []
+        split_brainstem = False
 
-        # FreeSurfer command
-        self.freesurfer_source  = "source $FREESURFER_HOME/SetUpFreeSurfer.sh && "
-        if self.parameters["segmentation_mode"].lower() == "freesurfer":
-            self.freesurfer_command = f"recon-all -i {self.input_im} -subject {self.subject_id} " + \
-                                      f"-all -parallel -norandomness"
+        for region_name in self.regions:
+            # Get region definition
+            region_definition = self.region_definitions[region_name]
 
-            # Optional parameters
-            for _input, tag in {"big_vents" : "bigventricles",
-                                "large_FOV" : "cw256"}.items():
-                if self.parameters[_input]:
-                    self.freesurfer_command += f" -{tag}"
-                
-        # Synthseg command        
-        elif self.parameters["segmentation_mode"].lower() == "synthseg":
-            sub_outdir = os.path.join(self.tmp_dir, self.parameters['subject_id'])
-            os.makedirs(sub_outdir, exist_ok=True)
-            self.freesurfer_command = f"mri_synthseg --i {self.input_im} --o {sub_outdir}"
-            if not self.parameters["use_gpu"]:
-                self.freesurfer_command += f" --cpu"
-            
+            # If region is a segmentation, add to list of regions to binarise
+            if region_definition["region_type"] == "segmentation":
+                if region_name not in segmentation_regions:
+                    segmentation_regions.append(region_name)
+                continue
+
+            # If region is brainstem_L or brainstem_R, set flag to split brainstem
+            if region_name in ("brainstem_L", "brainstem_R"):
+                split_brainstem = True
+                if "brainstem" not in segmentation_regions:
+                    segmentation_regions.append("brainstem")
+                continue
+
+            # If region makes up a derived region, add source regions to list of regions to binarise
+            for source_region in region_definition.get("combine_regions", []) + region_definition.get("subtract_regions", []):
+                source_definition = self.region_definitions.get(source_region)
+                if source_definition is None:
+                    self.loggers.errors(f"Unknown source region {source_region} for derived region {region_name}")
+                if source_definition["region_type"] != "segmentation":
+                    self.loggers.errors(
+                        f"Derived region {region_name} depends on non-segmentation source region {source_region}"
+                    )
+                if source_region not in segmentation_regions:
+                    segmentation_regions.append(source_region)
+
+        return segmentation_regions, split_brainstem
+
+    def build_synthseg_command(self):
+        """
+        Build SynthSeg command.
+        """
+        # Define paths and parameters
+        self.synthseg_source = "source $FREESURFER_HOME/SetUpFreeSurfer.sh && "
+        self.synthseg_outdir = os.path.join(self.interim_dir, "synthseg_outputs")
+        os.makedirs(self.synthseg_outdir, exist_ok=True)
+        self.synthseg_output = os.path.join(self.synthseg_outdir, "synthseg_output.nii.gz")
+
+        # Build command
+        self.synthseg_command = f"mri_synthseg --i {self.input_im} --o {self.synthseg_output}"
+        if not self.parameters["use_gpu"]:
+            self.synthseg_command += " --cpu"
+
+    def run_synthseg(self):
+        """
+        Run SynthSeg.
+        """
+        # Define command and log path
+        self.synthseg_log = os.path.join(self.log_dir, "segmentation.log")
+        command = self.synthseg_source + self.synthseg_command
+        self.loggers.verbose_log(f"SynthSeg command: {command}")
+
+        # Run SynthSeg
+        with open(self.synthseg_log, "a") as outfile:
+            synthseg_sub = subprocess.run(
+                ["bash", "-c", command],
+                stdout=outfile,
+                stderr=subprocess.STDOUT,
+                env=self.synthseg_env,
+            )
+
+        # Check if execution was successful
+        if synthseg_sub.returncode != 0:
+            self.loggers.errors(
+                f"SynthSeg execution returned non-zero exit status - "
+                f"please check log file at {self.synthseg_log}"
+            )
+
+        # Check if output file was created
+        if not os.path.exists(self.synthseg_output):
+            self.loggers.errors(
+                f"SynthSeg has not produced a segmentation at {self.synthseg_output} - "
+                f"please check log file at {self.synthseg_log}"
+            )
         else:
-            self.loggers.errors(f"Segmentation mode (--segmentation_mode) must " + \
-                                f"be set to either FreeSurfer or SynthSeg")
+            self.loggers.verbose_log("SynthSeg execution successful")
 
-    def run_freesurfer(self):
+    def build_nextbrain_command(self):
         """
-        Run Freesurfer.
+        Build NextBrain command.
         """
-        self.loggers.plugin_log("Starting execution")
-        self.freesurfer_log     = os.path.join(self.log_dir, "freesurfer.log")
-        self.freesurfer_command = self.freesurfer_source + self.freesurfer_command
-        self.loggers.plugin_log(f"Freesurfer command: {self.freesurfer_command}")
-        with open(self.freesurfer_log, "w") as outfile:
-            freesurfer_sub = subprocess.run(["bash", "-c",
-                                             self.freesurfer_command],
-                                             stdout=outfile,
-                                             stderr=subprocess.STDOUT,
-                                             env=self.freesurfer_env)
+        # Define paths and parameters
+        self.nextbrain_source = "source $FREESURFER_HOME/SetUpFreeSurfer.sh && "
+        self.nextbrain_outdir = os.path.join(self.interim_dir, "nextbrain_outputs")
+        os.makedirs(self.nextbrain_outdir, exist_ok=True)
 
-        # Copy outputs regardless of success
-        shutil.copytree(os.path.join(self.tmp_dir, self.parameters["subject_id"]), 
-                        os.path.join(self.interim_dir, "fs_outputs"))
-        if os.path.isdir(os.path.join(self.interim_dir, "fs_outputs")):
-            shutil.rmtree(os.path.join(self.tmp_dir, self.subject_id))
+        # FreeSurfer 8.1.0 positional CLI runs both sides in one command.
+        gpu_flag = 1 if self.parameters["use_gpu"] else 0
+        self.nextbrain_command = (
+            f"mri_histo_atlas_segment_fireants {self.input_im} {self.nextbrain_outdir} "
+            f"{gpu_flag} -1"
+        )
 
-        # Produce error if failed to process
-        if freesurfer_sub.returncode != 0:
-            self.loggers.errors(f"Freesurfer execution returned non-zero exit status - " +
-                                f"please check log file at {self.freesurfer_log}")
-
-        # Combine left and right together
-        if self.parameters["segmentation_mode"].lower() == "synthseg":
-            segmentation = glob.glob(os.path.join(os.path.join(self.interim_dir, "fs_outputs"), "*synthseg.nii.gz"))[0]
-        else:        
-            segmentation = os.path.join(os.path.join(self.interim_dir, "fs_outputs"), "mri", "aseg.mgz")
-        # Check required outputs have been produced
-        if not os.path.exists(segmentation):
-            self.loggers.errors(f"Freesurfer has not produced a segmentation at {segmentation}" +
-                                f"- please check log file at {self.freesurfer_log}")
-        else:
-            self.loggers.plugin_log("Freesurfer run successfully")
-
-    def convert_T1(self):
+    def run_nextbrain(self):
         """
-        Convert freesurfer T1.mgz to .nii.gz
+        Run NextBrain.
         """
-        # Define image and log paths
-        T1 = os.path.join(self.fs_outputs, "mri", "T1.mgz")
-        self.T1_out  = os.path.join(self.fs_outputs, "mri", "T1.nii.gz")
-        conversion_log = os.path.join(self.log_dir, "T1_conversion.log")
+        # Define command and log path
+        self.nextbrain_log = os.path.join(self.log_dir, "segmentation.log")
+        command = self.nextbrain_source + self.nextbrain_command
+        self.loggers.verbose_log(f"NextBrain command: {command}")
 
-        # Convert
-        with open(conversion_log, "w") as outfile:
-            subprocess.run(["bash", "-c",
-                            self.freesurfer_source + "mri_convert " +
-                            f"{T1} {self.T1_out}"],
-                            stdout=outfile,
-                            stderr=subprocess.STDOUT,
-                            env=self.freesurfer_env)
-            
-        # Check if conversion successful
-        if not os.path.exists(self.T1_out):
-            self.loggers.errors("Conversion of T1.mgz to T1.nii.gz failed - " +
-                               f"please check log file at {conversion_log}")
-        else:
-            shutil.copy(self.T1_out, os.path.join(self.output_dir, "fs_im.nii.gz"))
+        # Run NextBrain
+        with open(self.nextbrain_log, "a") as outfile:
+            nextbrain_sub = subprocess.run(
+                ["bash", "-c", command],
+                stdout=outfile,
+                stderr=subprocess.STDOUT,
+                env=self.synthseg_env,
+            )
 
-    def convert_seg(self):
-        """
-        Convert freesurfer aseg.mgz to .nii.gz
-        """
-        # Define image and log paths
-        seg = os.path.join(self.fs_outputs, "mri", "aseg.mgz")
-        self.seg_out  = os.path.join(self.fs_outputs, "mri", "aseg.nii.gz")
-        conversion_log = os.path.join(self.log_dir, "aseg_conversion.log")
+        # Check if execution was successful
+        if nextbrain_sub.returncode != 0:
+            self.loggers.errors(
+                f"NextBrain execution returned non-zero exit status - "
+                f"please check log file at {self.nextbrain_log}"
+            )
 
-        # Convert
-        with open(conversion_log, "w") as outfile:
-            subprocess.run(["bash", "-c",
-                            self.freesurfer_source + "mri_convert " +
-                            f"{seg} {self.seg_out}"],
-                            stdout=outfile,
-                            stderr=subprocess.STDOUT,
-                            env=self.freesurfer_env)
-            
-        # Check if conversion successful
-        if not os.path.exists(self.seg_out):
-            self.loggers.errors("Conversion of aseg.mgz to aseg.nii.gz failed - " +
-                               f"please check log file at {conversion_log}")
+        # Assign side-specific label images for direct L/R NextBrain extraction.
+        self.nextbrain_side_outputs = {
+            "L": os.path.join(self.nextbrain_outdir, "seg.left.nii.gz"),
+            "R": os.path.join(self.nextbrain_outdir, "seg.right.nii.gz"),
+        }
+        for side, side_output in self.nextbrain_side_outputs.items():
+            if not os.path.exists(side_output):
+                self.loggers.errors(
+                    f"NextBrain has not produced the {side} segmentation at {side_output} - "
+                    f"please check log file at {self.nextbrain_log}"
+                )
 
-    def binarise(self, region):
+        self.loggers.verbose_log("NextBrain execution successful")
+
+    def binarise(self, region: str, segmentation_output: str, label_key: str, segmentation_name: str):
         """
-        Binarise to extract required freesurfer labels
+        Create a binary mask for a segmentation region from an atlas segmentation output.
+
+        Parameters:
+        ---
+        region (str)                : Name of the segmentation region to extract.
+        segmentation_output (str)   : Path to the source atlas segmentation.
+        label_key (str)             : Region definition key containing atlas labels.
+        segmentation_name (str)     : Name of the atlas segmentation source.
         """
-        # Define image and log paths
-        if self.parameters["segmentation_mode"].lower() == "synthseg":
-            subcortical_seg = glob.glob(os.path.join(self.fs_outputs, "*synthseg.nii.gz"))[0]
-        else:
-            subcortical_seg = os.path.join(self.fs_outputs, "mri", "aseg.nii.gz")
-        bin_out  = os.path.join(self.interim_dir, f"{region}", f"{region}_bin.nii.gz")
+        # Define paths
+        bin_out = os.path.join(self.interim_dir, region, f"{region}_bin.nii.gz")
         os.makedirs(os.path.join(self.interim_dir, region), exist_ok=True)
-        binarise_log = os.path.join(self.log_dir, f"binarise.log")
+        binarise_log = os.path.join(self.log_dir, "segmentation.log")
 
-        if self.parameters["segmentation_mode"].lower() == "freesurfer":
-            labels = {"ventricles"     : "24 4 5 14 15 43 44 213",
-                      "cerebellum_L"   : "6 7 8",
-                      "cerebellum_R"   : "45 46 47",
-                      "cerebellumWM_L" : "7",
-                      "cerebellumWM_R" : "46",
-                      "brainstem"      : "16 170 171 172 173 174 175 177 178 179 71000 71010",
-                      "cerebrum_L"     : "2 3 10 11 12 13 17 18 19 20 26 28",
-                      "cerebrum_R"     : "41 42 49 50 51 52 53 54 55 56 58 60",
-                      "cerebrumWM_L"   : "2 78",
-                      "cerebrumWM_R"   : "41 79",
-                      "wholebrain"     : "6 7 8 16 45 46 47 192 "
-                                         "24 4 5 14 15 43 44 213 "
-                                         "2 3 10 11 12 13 17 18 19 20 26 28 "
-                                         "41 42 49 50 51 52 53 54 55 56 58 60"
-                     }
-        else:
-            labels = {"ventricles"     : "4 5 14 15 43 44",
-                      "cerebellum_L"   : "7 8",
-                      "cerebellum_R"   : "46 47",
-                      "cerebellumWM_L" : "7",
-                      "cerebellumWM_R" : "46",
-                      "brainstem"      : "16",
-                      "cerebrum_L"     : "2 3 10 11 12 13 17 18 26 28",
-                      "cerebrum_R"     : "41 42 49 50 51 52 53 54 58 60",
-                      "cerebrumWM_L"   : "2",
-                      "cerebrumWM_R"   : "41",
-                      "wholebrain"     : "2 3 4 5 7 8 10 11 12 13 14 15 16 17 18 26 28 "
-                                         "41 42 43 44 46 47 49 50 51 52 53 54 58 60"
-                     }
+        labels = self.region_definitions.get(region, {}).get(label_key)
+        if not labels:
+            self.loggers.errors(f"No {segmentation_name} labels defined for segmentation region {region}")
 
-        # Convert
-        with open(binarise_log, "w") as outfile:
-            subprocess.run(["bash", "-c",
-                            self.freesurfer_source + "mri_binarize " +
-                            f"--i {subcortical_seg} --match {labels[region]}" +
-                            f"--inv --o {bin_out}"],
-                            stdout=outfile,
-                            stderr=subprocess.STDOUT,
-                            env=self.freesurfer_env)
-            
-        # Check if conversion successful
+        label_string = " ".join(str(label) for label in labels)
+        freesurfer_source = "source $FREESURFER_HOME/SetUpFreeSurfer.sh && "
+
+        # Binarise using mri_binarize
+        with open(binarise_log, "a") as outfile:
+            binarise_sub = subprocess.run(
+                [
+                    "bash",
+                    "-c",
+                    freesurfer_source
+                    + "mri_binarize "
+                    + f"--i {segmentation_output} --match {label_string} --o {bin_out}",
+                ],
+                stdout=outfile,
+                stderr=subprocess.STDOUT,
+                env=self.synthseg_env,
+            )
+
+        # Check if execution was successful
+        if binarise_sub.returncode != 0:
+            self.loggers.errors(
+                f"Binarisation of {region} {segmentation_name} segmentation returned non-zero exit status - "
+                f"please check log file at {binarise_log}"
+            )
+
+        # Check if output file was created
         if not os.path.exists(bin_out):
-            self.loggers.errors(f"Binarisation of {region} segmentation failed - " +
-                                f"please check log file at {binarise_log}")
+            self.loggers.errors(
+                f"Binarisation of {region} {segmentation_name} segmentation failed - "
+                f"please check log file at {binarise_log}"
+            )
 
     def register_mni_atlas(self):
         """
         Register MNI-ICBM152 CerebrA atlas labels to subject space.
-    
+
         Reference:
-            Manera AL, Dadar M, Fonov V, Collins DL. (2020).
+            Manera AL, Dadar M, Fonov V, Collins DL. (2020)
             CerebrA, registration and manual label correction of Mindboggle-101 atlas
-            for MNI-ICBM152 template. Scientific Data, 7, 237.
+            for MNI-ICBM152 template. Scientific Data, 7, 237
             https://doi.org/10.1038/s41597-020-00564-0
         """
-        # Set paths
+        # Define paths
         atlas_t1 = "/app/assets/mni_icbm152_atlas_t1.nii.gz"
         atlas_labels = "/app/assets/mni_icbm152_CerebrA_atlas_labels.nii.gz"
         atlas_labels_out = os.path.join(self.interim_dir, "mni_icbm152_labels_subjectspace.nii.gz")
         brainstem_seg = os.path.join(self.interim_dir, "brainstem", "brainstem_bin.nii.gz")
-        
-        # Register atlas T1 to subject T1 space
-        registration = ants.registration(fixed=ants.image_read(self.input_im), 
-                                         moving=ants.image_read(atlas_t1), 
-                                         type_of_transform="Affine")
 
-        # Apply transform to atlas labels
-        transformed_labels = ants.apply_transforms(fixed=ants.image_read(self.input_im),
-                                                   moving=ants.image_read(atlas_labels),
-                                                   transformlist=[registration["fwdtransforms"][0]],
-                                                   interpolator="nearestNeighbor")
+        # Register atlas T1 to subject space
+        registration = ants.registration(
+            fixed=ants.image_read(self.input_im),
+            moving=ants.image_read(atlas_t1),
+            type_of_transform="Affine",
+        )
 
-        # Resample labels so dimensions match brainstem seg
-        resampled = ants.resample_image_to_target(image=transformed_labels,
-                                                  target=ants.image_read(brainstem_seg),
-                                                  interp_type="nearestNeighbor")
-                
-        # Save transformed labels
+        # Apply the transform to atlas labels
+        transformed_labels = ants.apply_transforms(
+            fixed=ants.image_read(self.input_im),
+            moving=ants.image_read(atlas_labels),
+            transformlist=[registration["fwdtransforms"][0]],
+            interpolator="nearestNeighbor",
+        )
+
+        # Resample to match brainstem segmentation space
+        resampled = ants.resample_image_to_target(
+            image=transformed_labels,
+            target=ants.image_read(brainstem_seg),
+            interp_type="nearestNeighbor",
+        )
+
+        # Save the transformed and resampled atlas labels
         ants.image_write(resampled, atlas_labels_out)
         self.atlas_in_subj = atlas_labels_out
 
-        # Check outputs
+        # Check output
         if not os.path.exists(atlas_labels_out):
             self.loggers.errors("Transformation of atlas labels to subject space failed")
 
     def split_brainstem(self):
         """
-        Split the binarised brainstem into left and right hemispheres
-        """        
+        Split the binarised brainstem into left and right masks.
+        """
         # Load brainstem segmentation
         brainstem_seg = nib.load(os.path.join(self.interim_dir, "brainstem", "brainstem_bin.nii.gz"))
         brainstem_data = brainstem_seg.get_fdata().astype(np.uint8)
         affine = brainstem_seg.affine
-        
+
         # Load atlas labels
         atlas_img = nib.load(self.atlas_in_subj)
         atlas_data = atlas_img.get_fdata().astype(int)
-        
-        # Create masks
+
+        # Create left and right masks
         mask = brainstem_data > 0
         left_mask = np.zeros_like(brainstem_data, dtype=np.uint8)
         right_mask = np.zeros_like(brainstem_data, dtype=np.uint8)
-        
-        # Assign voxels that overlap atlas left/right IDs
         left_vox = np.isin(atlas_data, [62]) & mask
         right_vox = np.isin(atlas_data, [11]) & mask
         left_mask[left_vox] = 1
         right_mask[right_vox] = 1
-        
-        # Find leftover voxels (in aseg but not in atlas L/R)
+
+        # Identify and remaining unassigned voxels
         assigned = left_vox | right_vox
         leftovers = mask & (~assigned)
-        
+
+        # Assign based on RAS coordinates
         if np.any(leftovers):
             coords = np.array(np.nonzero(leftovers)).T
             ras_coords = nib.affines.apply_affine(affine, coords)
-        
+
             for (i, j, k), ras in zip(coords, ras_coords):
-                if ras[0] < 0:   # Left side
+                if ras[0] < 0:
                     left_mask[i, j, k] = 1
-                else:            # Right side
+                else:
                     right_mask[i, j, k] = 1
-        
-        # Save outputs
+
+        # Save left and right brainstem masks
         left_output = os.path.join(self.interim_dir, "brainstem_L", "brainstem_L_bin.nii.gz")
         right_output = os.path.join(self.interim_dir, "brainstem_R", "brainstem_R_bin.nii.gz")
         for file in [left_output, right_output]:
             _dir = os.path.dirname(file)
             os.makedirs(_dir, exist_ok=True)
-            
+
         nib.save(nib.Nifti1Image(left_mask, affine, brainstem_seg.header), left_output)
         nib.save(nib.Nifti1Image(right_mask, affine, brainstem_seg.header), right_output)
 
         # Check outputs
         if not os.path.exists(left_output):
-            self.loggers.errors(f"Splitting of brainstem region failed")
+            self.loggers.errors("Splitting of brainstem region failed")
         elif not os.path.exists(right_output):
-            self.loggers.errors(f"Splitting of brainstem region failed")
+            self.loggers.errors("Splitting of brainstem region failed")
+
+    def create_global_mask(self):
+        """
+        Create a global binary mask from wholebrain minus ventricles.
+        """
+        # Define paths
+        wholebrain_path = os.path.join(self.interim_dir, "wholebrain", "wholebrain_bin.nii.gz")
+        ventricles_path = os.path.join(self.interim_dir, "ventricles", "ventricles_bin.nii.gz")
+        global_dir = os.path.join(self.interim_dir, "global")
+        global_path = os.path.join(global_dir, "global.nii.gz")
+        os.makedirs(global_dir, exist_ok=True)
+
+        # Load wholebrain and ventricles segmentations, create global mask
+        wholebrain_img = nib.load(wholebrain_path)
+        wholebrain_data = wholebrain_img.get_fdata() > 0
+        ventricles_data = nib.load(ventricles_path).get_fdata() > 0
+        global_data = np.logical_and(wholebrain_data, np.logical_not(ventricles_data)).astype(np.uint8)
+
+        # Save global mask
+        nib.save(
+            nib.Nifti1Image(global_data, wholebrain_img.affine, wholebrain_img.header),
+            global_path,
+        )
+
+        if not os.path.exists(global_path):
+            self.loggers.errors("Creation of global segmentation mask failed")
 
     def run_cortical_seg(self):
         """
-        Run FreeSurfer cortical segmentation
+        Run cortical segmentation and generate required binary region masks.
         """
-        # Define parameters
-        self.subject_id = self.parameters["subject_id"]
+        self.loggers.plugin_log("Running cortical segmentation")
+        # Create interim directory for segmentation outputs
         self.interim_dir = os.path.join(self.interim_dir, "segmentation")
         os.makedirs(self.interim_dir, exist_ok=True)
-        regions = self.parameters["regions"].split(",")
 
-        # Define inputs
-        if not self.parameters["freesurfer_outputs"]:
-            self.fs_outputs = os.path.join(self.interim_dir, "fs_outputs")
-            if self.parameters["run_registration"]:
-                self.input_im = os.path.join(self.output_dir, "registered_im.nii.gz")
-            elif self.parameters["run_preprocessing"]:
-                self.input_im = os.path.join(self.output_dir, "image.nii.gz")
+        # Set up paths and parameters for atlas segmentations
+        segmentation_regions, split_brainstem = self.resolve_segmentation_regions()
+        for required_region in ["wholebrain", "ventricles"]:
+            if required_region not in segmentation_regions:
+                segmentation_regions.append(required_region)
+
+        synthseg_regions = []
+        nextbrain_regions = []
+        for region in segmentation_regions:
+            region_definition = self.region_definitions.get(region, {})
+            has_synthseg_labels = bool(region_definition.get("synthseg_labels"))
+            has_nextbrain_labels = bool(region_definition.get("nextbrain_labels"))
+
+            if has_synthseg_labels:
+                synthseg_regions.append(region)
+            elif has_nextbrain_labels:
+                nextbrain_regions.append(region)
             else:
-                self.input_im = os.path.join(self.input_dir, "image.nii.gz")
+                self.loggers.errors(
+                    f"Segmentation region {region} must define synthseg_labels or nextbrain_labels"
+                )
 
-            # Run Freesurfer
-            self.loggers.plugin_log("Running Freesurfer")
-            self.build_freesurfer_command()
-            self.run_freesurfer()
-
-        # FreeSurfer outputs already provided    
+        # Determine input image for atlas segmentation based on which steps have been run
+        if self.parameters["run_registration"] or self.parameters["run_preprocessing"]:
+            self.input_im = os.path.join(self.output_dir, "image.nii.gz")
         else:
-            self.fs_outputs = os.path.join(self.input_dir, "fs_outputs")
+            self.input_im = os.path.join(self.input_dir, "image.nii.gz")
+        self.loggers.verbose_log(f"Segmentation input image: {self.input_im}")
 
-        # Convert aseg file to NIfTI
-        if self.parameters["segmentation_mode"].lower() == "freesurfer":
-            self.loggers.plugin_log("Converting aseg and T1 file to NIfTI")
-            self.convert_seg()
+        # Run required atlas segmentations
+        if synthseg_regions:
+            self.loggers.verbose_log("Running SynthSeg")
+            self.build_synthseg_command()
+            self.run_synthseg()
 
-        # Create region binary files
-        self.loggers.plugin_log("Creating region binary files")
-        # Join brainstem label - split in later steps
-        if "brainstem_L" in regions or "brainstem_R" in regions:
-            binarise_regions = [r for r in regions if r not in ("brainstem_L", "brainstem_R")]
-            binarise_regions.append("brainstem")
-        # Process regions
-        for region in binarise_regions:
-            self.binarise(region)
+        if nextbrain_regions:
+            self.loggers.verbose_log("Running NextBrain")
+            self.build_nextbrain_command()
+            self.run_nextbrain()
 
-        # Register MNI-ICBM152 atlas labels to subject space
-        self.loggers.plugin_log("Registering atlas labels to subject space")
-        self.register_mni_atlas()
+        # Binarise to extract required regions, and split brainstem if required
+        self.loggers.verbose_log("Creating region binary files")
+        for region in synthseg_regions:
+            self.binarise(region, self.synthseg_output, "synthseg_labels", "SynthSeg")
+        for region in nextbrain_regions:
+            side = self.region_definitions[region].get("side")
+            if side not in self.nextbrain_side_outputs:
+                self.loggers.errors(f"NextBrain region {region} must resolve to side L or R")
+            nextbrain_output = self.nextbrain_side_outputs[side]
+            self.binarise(region, nextbrain_output, "nextbrain_labels", "NextBrain")
 
-        # Split the brainstem into L&R
-        self.loggers.plugin_log("Splitting brainstem into L&R")
-        self.split_brainstem()
+        # If lateralised brainstem regions are required, split segmentation
+        if split_brainstem:
+            self.loggers.verbose_log("Registering atlas labels to subject space")
+            self.register_mni_atlas()
 
-        # Copy to output directory
+            self.loggers.verbose_log("Splitting brainstem into L&R")
+            self.split_brainstem()
+
+        self.loggers.verbose_log("Creating global segmentation mask")
+        self.create_global_mask()
+
+        # Copy final segmentation outputs to output directory
         outpath = os.path.join(self.output_dir, "segmentations")
         os.makedirs(outpath, exist_ok=True)
-        for region in regions:
+        for region in segmentation_regions:
             shutil.copy(os.path.join(self.interim_dir, region, f"{region}_bin.nii.gz"), outpath)
+        if split_brainstem:
+            for region in ["brainstem_L", "brainstem_R"]:
+                shutil.copy(os.path.join(self.interim_dir, region, f"{region}_bin.nii.gz"), outpath)
+        shutil.copy(os.path.join(self.interim_dir, "global", "global.nii.gz"), outpath)
